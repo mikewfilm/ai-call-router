@@ -1,0 +1,281 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Store Management{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">
+            <i class="fas fa-tachometer-alt me-2"></i>
+            Dashboard
+        </h1>
+    </div>
+</div>
+
+<!-- Quick Stats -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="stats-card">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h3>{{ stats.total_items }}</h3>
+                    <p>Total Inventory Items</p>
+                </div>
+                <i class="fas fa-boxes fa-2x opacity-75"></i>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stats-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h3>{{ stats.low_stock_items }}</h3>
+                    <p>Low Stock Items</p>
+                </div>
+                <i class="fas fa-exclamation-triangle fa-2x opacity-75"></i>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stats-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h3>{{ stats.active_coupons }}</h3>
+                    <p>Active Coupons</p>
+                </div>
+                <i class="fas fa-ticket-alt fa-2x opacity-75"></i>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stats-card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h3>{{ departments|length }}</h3>
+                    <p>Active Departments</p>
+                </div>
+                <i class="fas fa-sitemap fa-2x opacity-75"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="quick-actions">
+    <h5 class="mb-3">
+        <i class="fas fa-bolt me-2"></i>
+        Quick Actions
+    </h5>
+    <a href="{{ url_for('add_inventory_item') }}" class="quick-action-btn">
+        <i class="fas fa-plus me-2"></i>
+        Add Inventory Item
+    </a>
+    <a href="{{ url_for('add_coupon') }}" class="quick-action-btn">
+        <i class="fas fa-ticket-alt me-2"></i>
+        Create Coupon
+    </a>
+    <a href="{{ url_for('add_department') }}" class="quick-action-btn">
+        <i class="fas fa-sitemap me-2"></i>
+        Add Department
+    </a>
+                    <a href="{{ url_for('store_info_page') }}" class="quick-action-btn">
+        <i class="fas fa-store me-2"></i>
+        Update Store Info
+    </a>
+</div>
+
+<div class="row">
+    <!-- Store Information -->
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-store me-2"></i>
+                Store Information
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-12">
+                        <h6><strong>{{ store_config.store_name }}</strong></h6>
+                        <p class="text-muted mb-2">
+                            <i class="fas fa-map-marker-alt me-2"></i>
+                            {{ store_config.address }}
+                        </p>
+                        <p class="text-muted mb-2">
+                            <i class="fas fa-phone me-2"></i>
+                            {{ store_config.phone }}
+                        </p>
+                        <p class="text-muted mb-3">
+                            <i class="fas fa-clock me-2"></i>
+                            {{ store_config.hours }}
+                        </p>
+                        <a href="{{ url_for('store_info_page') }}" class="btn btn-primary btn-sm">
+                            <i class="fas fa-edit me-1"></i>
+                            Edit Store Info
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Departments Overview -->
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-sitemap me-2"></i>
+                Departments
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% for dept in departments[:4] %}
+                    <div class="col-6 mb-2">
+                        <div class="d-flex align-items-center">
+                            <span class="status-indicator status-active"></span>
+                            <span class="small">{{ dept.name }}</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% if departments|length > 4 %}
+                <p class="text-muted small mb-2">+{{ departments|length - 4 }} more departments</p>
+                {% endif %}
+                <a href="{{ url_for('departments_page') }}" class="btn btn-primary btn-sm">
+                    <i class="fas fa-eye me-1"></i>
+                    View All
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Activity -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-history me-2"></i>
+                Recent Activity
+            </div>
+            <div class="card-body">
+                {% if recent_audits %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Action</th>
+                                <th>User</th>
+                                <th>Details</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for audit in recent_audits %}
+                            <tr>
+                                <td>
+                                    <span class="badge bg-primary">{{ audit.action.replace('_', ' ').title() }}</span>
+                                </td>
+                                <td>
+                                    <i class="fas fa-user me-1"></i>
+                                    User #{{ audit.user_id }}
+                                </td>
+                                <td>
+                                    <small class="text-muted">
+                                        {{ audit.table_name.replace('_', ' ').title() }}
+                                        {% if audit.record_id %}#{{ audit.record_id }}{% endif %}
+                                    </small>
+                                </td>
+                                <td>
+                                    <small class="text-muted">
+                                        {{ audit.timestamp.strftime('%m/%d/%Y %H:%M') }}
+                                    </small>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted text-center py-4">
+                    <i class="fas fa-info-circle me-2"></i>
+                    No recent activity to display
+                </p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- AI Call Router Status -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-phone me-2"></i>
+                AI Call Router Status
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <i class="fas fa-circle text-success fa-2x mb-2"></i>
+                            <h6>System Status</h6>
+                            <p class="text-success mb-0">Online</p>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <i class="fas fa-microphone text-primary fa-2x mb-2"></i>
+                            <h6>Voice Templates</h6>
+                            <p class="text-primary mb-0">Active</p>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <i class="fas fa-brain text-info fa-2x mb-2"></i>
+                            <h6>AI Classification</h6>
+                            <p class="text-info mb-0">Ready</p>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <i class="fas fa-database text-warning fa-2x mb-2"></i>
+                            <h6>Inventory Sync</h6>
+                            <p class="text-warning mb-0">Connected</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Auto-refresh dashboard every 30 seconds
+setInterval(function() {
+    location.reload();
+}, 30000);
+
+// Add some interactive features
+$(document).ready(function() {
+    // Animate stats cards on load
+    $('.stats-card').each(function(index) {
+        $(this).delay(index * 100).animate({
+            opacity: 1,
+            transform: 'translateY(0)'
+        }, 500);
+    });
+    
+    // Add hover effects to quick action buttons
+    $('.quick-action-btn').hover(
+        function() {
+            $(this).addClass('shadow-lg');
+        },
+        function() {
+            $(this).removeClass('shadow-lg');
+        }
+    );
+});
+</script>
+{% endblock %}

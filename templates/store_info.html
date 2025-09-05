@@ -1,0 +1,300 @@
+{% extends "base.html" %}
+
+{% block title %}Store Information - Store Management{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>
+                <i class="fas fa-store me-2"></i>
+                Store Information
+            </h1>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left me-2"></i>
+                Back to Dashboard
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-edit me-2"></i>
+                Edit Store Information
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="store_name" class="form-label">
+                                <i class="fas fa-store me-2"></i>
+                                Store Name
+                            </label>
+                            <input type="text" class="form-control" id="store_name" name="store_name" 
+                                   value="{{ store_config.store_name }}" required>
+                            <div class="mt-2 d-flex justify-content-between align-items-center">
+                                <div class="small text-muted status-msg" id="status_store_name"></div>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" id="refresh_store_name">
+                                    <i class="fas fa-redo me-1"></i> Refresh Store Name Audio
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label for="phone" class="form-label">
+                                <i class="fas fa-phone me-2"></i>
+                                Phone Number
+                            </label>
+                            <input type="tel" class="form-control" id="phone" name="phone" 
+                                   value="{{ store_config.phone }}" required>
+                            <div class="mt-2 d-flex justify-content-between align-items-center">
+                                <div class="small text-muted status-msg" id="status_phone"></div>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" id="refresh_phone">
+                                    <i class="fas fa-redo me-1"></i> Refresh Phone Audio
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="address" class="form-label">
+                            <i class="fas fa-map-marker-alt me-2"></i>
+                            Store Address
+                        </label>
+                        <textarea class="form-control" id="address" name="address" rows="3" required>{{ store_config.address }}</textarea>
+                        <div class="mt-2 d-flex justify-content-between align-items-center">
+                            <div class="small text-muted status-msg" id="status_address"></div>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="refresh_address">
+                                <i class="fas fa-redo me-1"></i> Refresh Address Audio
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="hours" class="form-label">
+                            <i class="fas fa-clock me-2"></i>
+                            Store Hours
+                        </label>
+                        <textarea class="form-control" id="hours" name="hours" rows="4" 
+                                  placeholder="Example:&#10;Monday - Friday: 8:00 AM - 9:00 PM&#10;Saturday: 9:00 AM - 8:00 PM&#10;Sunday: 10:00 AM - 6:00 PM" required>{{ store_config.hours }}</textarea>
+                        <div class="form-text">
+                            <i class="fas fa-info-circle me-1"></i>
+                            This information will be used by the AI to answer customer questions about store hours.
+                        </div>
+                        <div class="mt-2 d-flex justify-content-between align-items-center">
+                            <div class="small text-muted status-msg" id="status_hours"></div>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="regen_hours">
+                                <i class="fas fa-redo me-1"></i> Refresh Hours Audio
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="holiday_hours" class="form-label">
+                            <i class="fas fa-umbrella-beach me-2"></i>
+                            Holiday & Special Hours
+                        </label>
+                        <textarea class="form-control" id="holiday_hours" name="holiday_hours" rows="3" 
+                                  placeholder="Example: Christmas Eve: 9am–6pm; New Year's Eve: 9am–6pm">{{ store_config.holiday_hours }}</textarea>
+                        <div class="form-text">
+                            <i class="fas fa-info-circle me-1"></i>
+                            Used when callers ask about holidays and special events.
+                        </div>
+                        <div class="mt-2 d-flex justify-content-between align-items-center">
+                            <div class="small text-muted status-msg" id="status_holiday"></div>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="regen_holiday">
+                                <i class="fas fa-redo me-1"></i> Refresh Holiday Audio
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label for="greeting_message" class="form-label">
+                            <i class="fas fa-microphone me-2"></i>
+                            Store Greeting
+                        </label>
+                        <textarea class="form-control" id="greeting_message" name="greeting_message" rows="4" 
+                                  placeholder="Example: Thank you for calling [Store Name]. How can I help you today?" required>{{ store_config.greeting_message }}</textarea>
+                        <div class="form-text">
+                            <i class="fas fa-info-circle me-1"></i>
+                            This is the message the AI will use to greet callers. Keep it friendly and professional.
+                        </div>
+                        <div class="mt-2 d-flex justify-content-between align-items-center">
+                            <div class="small text-muted status-msg" id="status_greeting"></div>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="regen_greeting">
+                                <i class="fas fa-redo me-1"></i> Refresh Greeting Audio
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="d-flex justify-content-between align-items-center">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-2"></i>
+                            Save Changes
+                        </button>
+                        <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <!-- Current Store Info Preview -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="fas fa-eye me-2"></i>
+                Current Information
+            </div>
+            <div class="card-body">
+                <h6><strong>{{ store_config.store_name }}</strong></h6>
+                <p class="text-muted mb-2">
+                    <i class="fas fa-map-marker-alt me-2"></i>
+                    {{ store_config.address }}
+                </p>
+                <p class="text-muted mb-2">
+                    <i class="fas fa-phone me-2"></i>
+                    {{ store_config.phone }}
+                </p>
+                <hr>
+                <h6><strong>Store Hours:</strong></h6>
+                <p class="text-muted small">{{ store_config.hours|replace('\n', '<br>')|safe }}</p>
+                <hr>
+                <h6><strong>AI Greeting:</strong></h6>
+                <p class="text-muted small">{{ store_config.greeting_message }}</p>
+            </div>
+        </div>
+        
+        <!-- Tips Card -->
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-lightbulb me-2"></i>
+                Tips for Better AI Performance
+            </div>
+            <div class="card-body">
+                <ul class="list-unstyled">
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Keep store hours clear and consistent
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Use a friendly, professional greeting
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Include the store name in the greeting
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Update information regularly
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Be specific about holiday hours
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Removed legacy non-editable Holiday & Special Hours card -->
+{% endblock %}
+
+{% block scripts %}
+<script>
+$(document).ready(function() {
+    // Auto-resize textareas
+    $('textarea').on('input', function() {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
+    });
+    
+    // Form validation
+    $('form').on('submit', function(e) {
+        let isValid = true;
+        
+        // Check required fields
+        $(this).find('[required]').each(function() {
+            if (!$(this).val().trim()) {
+                $(this).addClass('is-invalid');
+                isValid = false;
+            } else {
+                $(this).removeClass('is-invalid');
+            }
+        });
+        
+        if (!isValid) {
+            e.preventDefault();
+            alert('Please fill in all required fields.');
+        }
+    });
+    
+    // Remove validation styling on input
+    $('input, textarea').on('input', function() {
+        $(this).removeClass('is-invalid');
+    });
+
+    function postRegen(buttonEl, text, statusEl) {
+        if (!text || !text.trim()) { if (statusEl) { statusEl.textContent = 'Nothing to refresh.'; } return; }
+        const btn = $(buttonEl);
+        const originalHtml = btn.html();
+        btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1"></span>Refreshing');
+        if (statusEl) { statusEl.textContent = ''; }
+
+        fetch('{{ url_for('proxy_tts_regenerate') }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text })
+        }).then(r => r.json()).then(j => {
+            if (j.ok) {
+                if (statusEl) {
+                    statusEl.classList.remove('text-danger');
+                    statusEl.classList.add('text-success');
+                    statusEl.textContent = 'Audio refreshed';
+                }
+            } else {
+                if (statusEl) {
+                    statusEl.classList.remove('text-success');
+                    statusEl.classList.add('text-danger');
+                    statusEl.textContent = 'Refresh failed: ' + (j.error || 'unknown error');
+                }
+            }
+        }).catch(err => {
+            if (statusEl) {
+                statusEl.classList.remove('text-success');
+                statusEl.classList.add('text-danger');
+                statusEl.textContent = 'Refresh error: ' + err;
+            }
+        }).finally(() => {
+            btn.prop('disabled', false).html(originalHtml);
+        });
+    }
+
+    $('#regen_greeting').on('click', function() {
+        postRegen(this, $('#greeting_message').val(), document.getElementById('status_greeting'));
+    });
+    $('#regen_hours').on('click', function() {
+        postRegen(this, $('#hours').val(), document.getElementById('status_hours'));
+    });
+    $('#regen_holiday').on('click', function() {
+        postRegen(this, $('#holiday_hours').val(), document.getElementById('status_holiday'));
+    });
+
+    // New refresh buttons for other fields
+    $('#refresh_store_name').on('click', function() {
+        postRegen(this, $('#store_name').val(), document.getElementById('status_store_name'));
+    });
+    $('#refresh_phone').on('click', function() {
+        postRegen(this, $('#phone').val(), document.getElementById('status_phone'));
+    });
+    $('#refresh_address').on('click', function() {
+        postRegen(this, $('#address').val(), document.getElementById('status_address'));
+    });
+});
+</script>
+{% endblock %}

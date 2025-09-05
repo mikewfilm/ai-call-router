@@ -1,0 +1,65 @@
+🔄 Stopping any existing Flask processes...
+🧹 Waiting for processes to stop...
+🔍 Checking if port 5003 is free...
+⚠️  Port 5003 is still in use. Force killing...
+🚀 Starting Flask app on port 5003...
+📝 You can stop the app with Ctrl+C
+🔗 Health check: http://localhost:5003/health
+
+[INFO] Inventory system loaded successfully
+[INFO] Pharmacy system loaded successfully
+[INFO] Coupon system loaded successfully
+[TTS DEBUG] Checking for existing file: /Users/mikewilson/Desktop/ai-call-router/static/tts_cache/yes_or_no.mp3
+[TTS DEBUG] File exists, returning: /Users/mikewilson/Desktop/ai-call-router/static/tts_cache/yes_or_no.mp3
+[TTS DEBUG] Checking for existing file: /Users/mikewilson/Desktop/ai-call-router/static/tts_cache/err_global.mp3
+[TTS DEBUG] File exists, returning: /Users/mikewilson/Desktop/ai-call-router/static/tts_cache/err_global.mp3
+[TTS DEBUG] Checking for existing file: /Users/mikewilson/Desktop/ai-call-router/static/tts_cache/err_confirm.mp3
+[TTS DEBUG] File exists, returning: /Users/mikewilson/Desktop/ai-call-router/static/tts_cache/err_confirm.mp3
+[TTS DEBUG] Checking for existing file: /Users/mikewilson/Desktop/ai-call-router/static/tts_cache/no_recording.mp3
+[TTS DEBUG] File exists, returning: /Users/mikewilson/Desktop/ai-call-router/static/tts_cache/no_recording.mp3
+[TTS DEBUG] Checking for existing file: /Users/mikewilson/Desktop/ai-call-router/static/tts_cache/reask.mp3
+[TTS DEBUG] File exists, returning: /Users/mikewilson/Desktop/ai-call-router/static/tts_cache/reask.mp3
+[TTS DEBUG] Checking for existing file: /Users/mikewilson/Desktop/ai-call-router/static/tts_cache/reask_cap.mp3
+[TTS DEBUG] File exists, returning: /Users/mikewilson/Desktop/ai-call-router/static/tts_cache/reask_cap.mp3
+[TTS DEBUG] Checking for existing file: /Users/mikewilson/Desktop/ai-call-router/static/tts_cache/err_result.mp3
+[TTS DEBUG] File exists, returning: /Users/mikewilson/Desktop/ai-call-router/static/tts_cache/err_result.mp3
+[BOOT] TTS prewarm complete.
+Starting Flask on 0.0.0.0:5003 (Whisper=small)
+[CONFIG] PUBLIC_BASE_URL = (auto from request.url_root)
+[CONFIG] USE_FILLER      = False
+[CONFIG] HOLDY_TINY_CDN  = https://mantis-snake-7285.twil.io/assets/holdy_tiny.mp3
+[CONFIG] HOLDY_MID_CDN   = https://mantis-snake-7285.twil.io/assets/holdy_mid.mp3
+[CONFIG] HOLDY_CLARIFY_CDN = https://mantis-snake-7285.twil.io/assets/holdy_clarify.mp3
+[CONFIG] HOLD_BG_CDN     = (disabled)
+[CONFIG] POLL_PAUSE      = 0
+[CONFIG] MAIN_TIMEOUT    = 3
+[CONFIG] MAIN_MAXLEN     = 10
+[CONFIG] CONF_TIMEOUT    = 3
+[CONFIG] CONF_MAXLEN     = 3
+[CONFIG] RECORD_BEEP     = False
+[CONFIG] MIN_ASR_LOGPROB = -0.35
+[CONFIG] HOLD_MIN_GAP_SEC = 1.5
+[CONFIG] CORRECTION_HOPS_MAX = 2
+[CONFIG] OPERATOR_NUMBER = (unset)
+[CONFIG] DEPT_DIAL_MAP   = (empty)
+[CONFIG] USE_GATHER_MAIN = True
+ * Serving Flask app 'app'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5003
+ * Running on http://192.168.0.29:5003
+[33mPress CTRL+C to quit[0m
+127.0.0.1 - - [18/Aug/2025 18:15:44] "GET /health HTTP/1.1" 200 -
+127.0.0.1 - - [18/Aug/2025 18:15:44] "GET /coupon_process?job=test123&input=unclear HTTP/1.1" 200 -
+127.0.0.1 - - [18/Aug/2025 18:16:08] "GET /coupon_process?job=test123&input=unclear HTTP/1.1" 200 -
+127.0.0.1 - - [18/Aug/2025 18:16:39] "GET /health HTTP/1.1" 200 -
+127.0.0.1 - - [18/Aug/2025 18:16:39] "GET /coupon_process?job=test123&input=unclear HTTP/1.1" 200 -
+127.0.0.1 - - [18/Aug/2025 18:17:03] "GET /coupon_process?job=test123&input=unclear HTTP/1.1" 200 -
+127.0.0.1 - - [18/Aug/2025 18:17:16] "GET /coupon_process?job=test123&input=unclear HTTP/1.1" 200 -
+127.0.0.1 - - [18/Aug/2025 18:17:47] "GET /health HTTP/1.1" 200 -
+127.0.0.1 - - [18/Aug/2025 18:17:47] "GET /coupon_process?job=test123&input=unclear HTTP/1.1" 200 -
+127.0.0.1 - - [18/Aug/2025 18:18:44] "GET /coupon_process?job=test123&input=unclear HTTP/1.1" 200 -
+./start_app.sh: line 22: 26631 Killed: 9               python3 app.py
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/resource_tracker.py:301: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/mp-1eomr0n9'}
+  warnings.warn(

@@ -1,0 +1,17 @@
+# GitHub Pages Configuration
+# This ensures index.html is served as the main page
+
+# Set the theme (optional)
+theme: jekyll-theme-cayman
+
+# Exclude README.md from being processed as a page
+exclude:
+  - README.md
+
+# Set the default layout
+defaults:
+  - scope:
+      path: ""
+      type: "pages"
+    values:
+      layout: "default"

@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block title %}Dialogue Templates - Store Management{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>
+                <i class="fas fa-comments me-2"></i>
+                Dialogue Templates
+            </h1>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left me-2"></i>
+                Back to Dashboard
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-edit me-2"></i>
+                Voice App Dialogue Lines
+            </div>
+            <div class="card-body">
+                <p class="text-muted mb-4">
+                    Edit the dialogue lines used by the voice app. These templates control what the AI says to customers during calls.
+                </p>
+
+                {% for category, templates in dialogue_templates.items() %}
+                {% set collapse_id = 'cat_' + category %}
+                <div class="mb-3">
+                    <h4 class="text-primary mb-0">
+                        {% if category == 'general' %}
+                            <i class="fas fa-cog me-2"></i>General Messages
+                        {% elif category == 'pharmacy' %}
+                            <i class="fas fa-pills me-2"></i>Pharmacy Messages
+                        {% elif category == 'coupons' %}
+                            <i class="fas fa-ticket-alt me-2"></i>Coupon Messages
+                        {% elif category == 'spanish' %}
+                            <i class="fas fa-language me-2"></i>Spanish Messages
+                        {% elif category == 'manager' %}
+                            <i class="fas fa-user-tie me-2"></i>Manager Messages
+                        {% else %}
+                            <i class="fas fa-comment me-2"></i>{{ category.title() }} Messages
+                        {% endif %}
+                        <button class="btn btn-link ps-2" type="button" data-bs-toggle="collapse" data-bs-target="#{{ collapse_id }}" aria-expanded="false" aria-controls="{{ collapse_id }}">
+                            <span class="me-1">Toggle</span>
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                    </h4>
+
+                    <div class="collapse" id="{{ collapse_id }}">
+                      <div class="row mt-3">
+                        {% for pair in templates %}
+                        {% set key = pair[0] %}
+                        {% set text = pair[1] %}
+                        <div class="col-md-6 mb-3">
+                            <form method="POST" action="{{ url_for('update_dialogue_template') }}">
+                                <input type="hidden" name="category" value="{{ category }}">
+                                <input type="hidden" name="key" value="{{ key }}">
+                                
+                                <div class="form-group">
+                                    <label for="{{ category }}_{{ key }}" class="form-label fw-bold">
+                                        {{ key.replace('_', ' ').title() }}
+                                        {% if category == 'pharmacy' and key in ['connect_pharmacist','connect_pharmacy_staff'] %}
+                                            <span class="badge bg-success ms-2">Used in calls</span>
+                                        {% endif %}
+                                    </label>
+                                    <textarea 
+                                        class="form-control" 
+                                        id="{{ category }}_{{ key }}" 
+                                        name="text" 
+                                        rows="3" 
+                                        placeholder="Enter dialogue text..."
+                                    >{{ text }}</textarea>
+                                    <div class="form-text">
+                                        <small class="text-muted">
+                                            {% if '{' in text and '}' in text %}
+                                                <i class="fas fa-info-circle me-1"></i>
+                                                Contains variables: {{ text[text.find('{'):text.find('}')+1] }}
+                                            {% endif %}
+                                        </small>
+                                    </div>
+                                </div>
+                                
+                                <button type="submit" class="btn btn-primary btn-sm mt-2">
+                                    <i class="fas fa-save me-1"></i>
+                                    Update
+                                </button>
+                            </form>
+                        </div>
+                        {% endfor %}
+                      </div>
+                    </div>
+                </div>
+                {% endfor %}
+
+                {% if not dialogue_templates %}
+                <div class="text-center py-5">
+                    <i class="fas fa-comments fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">No dialogue templates found</h5>
+                    <p class="text-muted">Dialogue templates will be created automatically when the voice app starts.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Help Section -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-question-circle me-2"></i>
+                Help & Tips
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6><i class="fas fa-info-circle me-2"></i>Template Variables</h6>
+                        <ul class="list-unstyled">
+                            <li><code>{medication}</code> - Prescription medication name</li>
+                            <li><code>{pharmacy}</code> - Pharmacy name</li>
+                            <li><code>{item}</code> - Product/item name</li>
+                            <li><code>{department}</code> - Store department name</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <h6><i class="fas fa-lightbulb me-2"></i>Best Practices</h6>
+                        <ul class="list-unstyled">
+                            <li>Keep messages clear and concise</li>
+                            <li>Use friendly, professional tone</li>
+                            <li>Test changes with voice app</li>
+                            <li>Maintain consistency across categories</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+$(document).ready(function() {
+    // Auto-resize textareas
+    $('textarea').on('input', function() {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
+    });
+    
+    // Form submission feedback
+    $('form').on('submit', function() {
+        const btn = $(this).find('button[type="submit"]');
+        const originalText = btn.html();
+        btn.html('<i class="fas fa-spinner fa-spin me-1"></i>Updating...');
+        btn.prop('disabled', true);
+        
+        setTimeout(() => {
+            btn.html(originalText);
+            btn.prop('disabled', false);
+        }, 2000);
+    });
+});
+</script>
+{% endblock %}

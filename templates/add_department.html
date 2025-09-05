@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+
+{% block title %}Add Department - Store Management{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>
+                <i class="fas fa-plus me-2"></i>
+                Add New Department
+            </h1>
+            <a href="{{ url_for('departments_page') }}" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left me-2"></i>
+                Back to Departments
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-edit me-2"></i>
+                Department Information
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">
+                            <i class="fas fa-sitemap me-2"></i>
+                            Department Name *
+                        </label>
+                        <input type="text" class="form-control" id="name" name="name" 
+                               placeholder="e.g., Grocery, Electronics, Customer Service" required>
+                        <div class="form-text">
+                            <i class="fas fa-info-circle me-1"></i>
+                            This name will be used by the AI to route customer calls
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="phone_extension" class="form-label">
+                            <i class="fas fa-phone me-2"></i>
+                            Phone Extension *
+                        </label>
+                        <input type="text" class="form-control" id="phone_extension" name="phone_extension" 
+                               placeholder="e.g., 101, 102, 103" required>
+                        <div class="form-text">
+                            <i class="fas fa-info-circle me-1"></i>
+                            The extension number customers will be transferred to
+                        </div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label for="description" class="form-label">
+                            <i class="fas fa-align-left me-2"></i>
+                            Description
+                        </label>
+                        <textarea class="form-control" id="description" name="description" rows="4" 
+                                  placeholder="Describe what this department handles, any special services, or additional information..."></textarea>
+                        <div class="form-text">
+                            <i class="fas fa-info-circle me-1"></i>
+                            Optional description to help staff understand the department's scope
+                        </div>
+                    </div>
+                    
+                    <div class="d-flex justify-content-between">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-2"></i>
+                            Add Department
+                        </button>
+                        <a href="{{ url_for('departments_page') }}" class="btn btn-outline-secondary">
+                            Cancel
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <!-- Department Tips -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="fas fa-lightbulb me-2"></i>
+                Department Setup Tips
+            </div>
+            <div class="card-body">
+                <ul class="list-unstyled">
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Use clear, recognizable department names
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Assign unique phone extensions
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Include descriptions for complex departments
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Consider customer service as a catch-all
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Test extensions before going live
+                    </li>
+                </ul>
+            </div>
+        </div>
+        
+        <!-- Common Departments -->
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-list me-2"></i>
+                Common Department Types
+            </div>
+            <div class="card-body">
+                <div class="mb-2">
+                    <strong>Grocery</strong>
+                    <small class="text-muted d-block">Food items, beverages, snacks</small>
+                </div>
+                <div class="mb-2">
+                    <strong>Meat & Seafood</strong>
+                    <small class="text-muted d-block">Fresh meat, fish, poultry</small>
+                </div>
+                <div class="mb-2">
+                    <strong>Deli</strong>
+                    <small class="text-muted d-block">Deli meats, cheeses, prepared foods</small>
+                </div>
+                <div class="mb-2">
+                    <strong>Bakery</strong>
+                    <small class="text-muted d-block">Bread, pastries, cakes</small>
+                </div>
+                <div class="mb-2">
+                    <strong>Electronics</strong>
+                    <small class="text-muted d-block">Phones, computers, accessories</small>
+                </div>
+                <div class="mb-2">
+                    <strong>Home and Garden</strong>
+                    <small class="text-muted d-block">Tools, hardware, plants</small>
+                </div>
+                <div class="mb-2">
+                    <strong>Health and Beauty</strong>
+                    <small class="text-muted d-block">Personal care, cosmetics, vitamins</small>
+                </div>
+                <div class="mb-2">
+                    <strong>Pet Supplies</strong>
+                    <small class="text-muted d-block">Pet food, toys, care items</small>
+                </div>
+                <div class="mb-2">
+                    <strong>Customer Service</strong>
+                    <small class="text-muted d-block">General inquiries, complaints, returns</small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+$(document).ready(function() {
+    // Form validation
+    $('form').on('submit', function(e) {
+        let isValid = true;
+        
+        // Check required fields
+        $(this).find('[required]').each(function() {
+            if (!$(this).val().trim()) {
+                $(this).addClass('is-invalid');
+                isValid = false;
+            } else {
+                $(this).removeClass('is-invalid');
+            }
+        });
+        
+        // Validate phone extension format
+        let extension = $('#phone_extension').val().trim();
+        if (extension && !/^\d{1,4}$/.test(extension)) {
+            $('#phone_extension').addClass('is-invalid');
+            isValid = false;
+        }
+        
+        if (!isValid) {
+            e.preventDefault();
+            alert('Please check the form for errors.');
+        }
+    });
+    
+    // Remove validation styling on input
+    $('input, textarea').on('input', function() {
+        $(this).removeClass('is-invalid');
+    });
+    
+    // Auto-resize textarea
+    $('#description').on('input', function() {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
+    });
+});
+</script>
+{% endblock %}

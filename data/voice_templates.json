@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "template_type": "greeting",
+    "text_content": "Thank you for calling our store. How can I help you today?",
+    "is_active": true,
+    "variation_number": 1,
+    "created_at": "2025-08-25T17:13:32.776560"
+  },
+  {
+    "id": 2,
+    "template_type": "hold",
+    "text_content": "Please hold while I connect you to the appropriate department.",
+    "is_active": true,
+    "variation_number": 1,
+    "created_at": "2025-08-25T17:13:32.776561"
+  }
+]

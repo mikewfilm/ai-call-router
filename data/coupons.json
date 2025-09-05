@@ -1,0 +1,13 @@
+[
+  {
+    "id": 1,
+    "code": "SAVE20",
+    "description": "20% off all groceries",
+    "discount_type": "percentage",
+    "discount_value": 20,
+    "is_store_wide": true,
+    "is_active": true,
+    "expires_at": "2024-12-31T23:59:59",
+    "created_at": "2025-08-25T17:13:32.776474"
+  }
+]

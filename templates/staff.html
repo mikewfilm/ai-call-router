@@ -1,0 +1,270 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="fas fa-users me-2"></i>Staff Management</h1>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addStaffModal">
+        <i class="fas fa-plus me-2"></i>Add Staff Member
+    </button>
+</div>
+
+<div class="row">
+    <!-- Staff Overview -->
+    <div class="col-md-4 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-chart-pie me-2"></i>
+                Staff Overview
+            </div>
+            <div class="card-body text-center">
+                <div class="row">
+                    <div class="col-6">
+                        <h3 class="text-primary">12</h3>
+                        <small class="text-muted">Total Staff</small>
+                    </div>
+                    <div class="col-6">
+                        <h3 class="text-success">8</h3>
+                        <small class="text-muted">Active Today</small>
+                    </div>
+                </div>
+                <hr>
+                <div class="row">
+                    <div class="col-6">
+                        <h4 class="text-info">3</h4>
+                        <small class="text-muted">Managers</small>
+                    </div>
+                    <div class="col-6">
+                        <h4 class="text-warning">9</h4>
+                        <small class="text-muted">Employees</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Department Staff -->
+    <div class="col-md-8 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-sitemap me-2"></i>
+                Staff by Department
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Department</th>
+                                <th>Staff Count</th>
+                                <th>Manager</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>Grocery</strong></td>
+                                <td>4 staff</td>
+                                <td>Sarah Johnson</td>
+                                <td><span class="badge bg-success">Fully Staffed</span></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Pet Supplies</strong></td>
+                                <td>2 staff</td>
+                                <td>Mike Chen</td>
+                                <td><span class="badge bg-warning">Understaffed</span></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Electronics</strong></td>
+                                <td>3 staff</td>
+                                <td>Lisa Rodriguez</td>
+                                <td><span class="badge bg-success">Fully Staffed</span></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Customer Service</strong></td>
+                                <td>3 staff</td>
+                                <td>David Wilson</td>
+                                <td><span class="badge bg-success">Fully Staffed</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Staff Directory -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-address-book me-2"></i>
+                Staff Directory
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% for s in staff_list %}
+                    <div class="col-md-6 mb-3">
+                        <div class="card border">
+                            <div class="card-body">
+                                <div class="d-flex align-items-center">
+                                    <div class="avatar bg-primary text-white rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 50px; height: 50px;">
+                                        <i class="fas fa-user"></i>
+                                    </div>
+                                    <div class="flex-grow-1">
+                                        <h6 class="mb-1">{{ s.name }}</h6>
+                                        <small class="text-muted">{{ s.department }} {{ s.role }}</small>
+                                        <br>
+                                        <small class="{% if s.is_active %}text-success{% else %}text-muted{% endif %}"><i class="fas fa-circle me-1"></i>{% if s.is_active %}Active{% else %}Inactive{% endif %}</small>
+                                        <div class="small text-muted">{{ s.email }} · {{ s.phone }}</div>
+                                    </div>
+                                    <div class="text-end">
+                                        <button class="btn btn-sm btn-outline-secondary me-2"
+                                                data-bs-toggle="modal"
+                                                data-bs-target="#editStaffModal"
+                                                data-id="{{ s.id }}"
+                                                data-name="{{ s.name }}"
+                                                data-email="{{ s.email }}"
+                                                data-phone="{{ s.phone }}"
+                                                data-department="{{ s.department }}"
+                                                data-role="{{ s.role }}"
+                                                data-active="{{ 'true' if s.is_active else 'false' }}">
+                                            Edit
+                                        </button>
+                                        <form method="POST" action="{{ url_for('staff_delete', staff_id=s.id) }}" class="d-inline" onsubmit="return confirm('Remove this staff member?')">
+                                            <button class="btn btn-sm btn-outline-danger">Remove</button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Staff Modal -->
+<div class="modal fade" id="addStaffModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add New Staff Member</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form method="POST" action="{{ url_for('staff_add') }}">
+                    <div class="mb-3">
+                        <label class="form-label">Full Name</label>
+                        <input type="text" name="name" class="form-control" placeholder="Enter full name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Email</label>
+                        <input type="email" name="email" class="form-control" placeholder="Enter email address">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Department</label>
+                        <select class="form-select" name="department">
+                            <option>Select Department</option>
+                            <option>Grocery</option>
+                            <option>Pet Supplies</option>
+                            <option>Electronics</option>
+                            <option>Customer Service</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Role</label>
+                        <select class="form-select" name="role">
+                            <option>Employee</option>
+                            <option>Manager</option>
+                        </select>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="is_active" id="add_active" checked>
+                        <label class="form-check-label" for="add_active">Active</label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" form="" class="btn btn-primary" onclick="this.closest('.modal').querySelector('form').submit()">Add Staff Member</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Reusable Edit Staff Modal -->
+<div class="modal fade" id="editStaffModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Edit Staff Member</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="#">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Full Name</label>
+                        <input type="text" name="name" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Email</label>
+                        <input type="email" name="email" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Phone</label>
+                        <input type="text" name="phone" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Department</label>
+                        <input type="text" name="department" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Role</label>
+                        <input type="text" name="role" class="form-control">
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="is_active" id="edit_active">
+                        <label class="form-check-label" for="edit_active">Active</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var editModal = document.getElementById('editStaffModal');
+  if (!editModal) return;
+  editModal.addEventListener('show.bs.modal', function (event) {
+    var button = event.relatedTarget;
+    if (!button) return;
+    var id = button.getAttribute('data-id');
+    var name = button.getAttribute('data-name') || '';
+    var email = button.getAttribute('data-email') || '';
+    var phone = button.getAttribute('data-phone') || '';
+    var dept = button.getAttribute('data-department') || '';
+    var role = button.getAttribute('data-role') || '';
+    var active = (button.getAttribute('data-active') === 'true');
+
+    var form = editModal.querySelector('form');
+    form.action = '/staff/' + id + '/update';
+    form.querySelector('input[name="name"]').value = name;
+    form.querySelector('input[name="email"]').value = email;
+    form.querySelector('input[name="phone"]').value = phone;
+    form.querySelector('input[name="department"]').value = dept;
+    form.querySelector('input[name="role"]').value = role;
+    form.querySelector('input[name="is_active"]').checked = active;
+  });
+});
+</script>
+
+<!-- Removed the generic coming soon notice; CRUD is live -->
+{% endblock %}

@@ -1,0 +1,344 @@
+{% extends "base.html" %}
+
+{% block title %}Add Coupon - Store Management{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>
+                <i class="fas fa-plus me-2"></i>
+                Add New Coupon
+            </h1>
+            <a href="{{ url_for('coupons_page') }}" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left me-2"></i>
+                Back to Coupons
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-edit me-2"></i>
+                Coupon Information
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="code" class="form-label">
+                                <i class="fas fa-ticket-alt me-2"></i>
+                                Coupon Code *
+                            </label>
+                            <input type="text" class="form-control" id="code" name="code" 
+                                   placeholder="e.g., SAVE20, WELCOME10" required>
+                            <div class="form-text">
+                                <i class="fas fa-info-circle me-1"></i>
+                                Unique code customers will use to redeem the coupon
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label for="description" class="form-label">
+                                <i class="fas fa-align-left me-2"></i>
+                                Description *
+                            </label>
+                            <input type="text" class="form-control" id="description" name="description" 
+                                   placeholder="e.g., 20% off all groceries" required>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="discount_type" class="form-label">
+                                <i class="fas fa-percentage me-2"></i>
+                                Discount Type *
+                            </label>
+                            <select class="form-control" id="discount_type" name="discount_type" required>
+                                <option value="">Select Type</option>
+                                <option value="percentage">Percentage Off</option>
+                                <option value="fixed">Fixed Amount Off</option>
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label for="discount_value" class="form-label">
+                                <i class="fas fa-dollar-sign me-2"></i>
+                                Discount Value *
+                            </label>
+                            <input type="number" class="form-control" id="discount_value" name="discount_value" 
+                                   min="0" step="0.01" placeholder="0.00" required>
+                            <div class="form-text" id="discount_help">
+                                <i class="fas fa-info-circle me-1"></i>
+                                Enter the discount amount
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="expires_at" class="form-label">
+                                <i class="fas fa-calendar-alt me-2"></i>
+                                Expiration Date
+                            </label>
+                            <input type="date" class="form-control" id="expires_at" name="expires_at">
+                            <div class="form-text">
+                                <i class="fas fa-info-circle me-1"></i>
+                                Leave blank for no expiration
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">
+                                <i class="fas fa-globe me-2"></i>
+                                Coupon Scope
+                            </label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="is_store_wide" id="store_wide" value="1" checked>
+                                <label class="form-check-label" for="store_wide">
+                                    Store-wide (applies to all items)
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="is_store_wide" id="product_specific" value="0">
+                                <label class="form-check-label" for="product_specific">
+                                    Product-specific (applies to selected items)
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="is_active" name="is_active" checked>
+                            <label class="form-check-label" for="is_active">
+                                <i class="fas fa-check-circle me-2"></i>
+                                Activate coupon immediately
+                            </label>
+                        </div>
+                        <div class="form-text">
+                            <i class="fas fa-info-circle me-1"></i>
+                            You can activate/deactivate coupons later from the main list
+                        </div>
+                    </div>
+                    
+                    <div class="d-flex justify-content-between">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-2"></i>
+                            Create Coupon
+                        </button>
+                        <a href="{{ url_for('coupons_page') }}" class="btn btn-outline-secondary">
+                            Cancel
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <!-- Coupon Preview -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="fas fa-eye me-2"></i>
+                Coupon Preview
+            </div>
+            <div class="card-body">
+                <div class="text-center">
+                    <div class="border rounded p-3 mb-3">
+                        <h5 id="preview_code">COUPON CODE</h5>
+                        <p class="text-muted mb-2" id="preview_description">Description will appear here</p>
+                        <span class="badge bg-success" id="preview_discount">DISCOUNT</span>
+                    </div>
+                    <small class="text-muted" id="preview_scope">Store-wide coupon</small>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Coupon Tips -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="fas fa-lightbulb me-2"></i>
+                Coupon Best Practices
+            </div>
+            <div class="card-body">
+                <ul class="list-unstyled">
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Use memorable, easy-to-type codes
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Set reasonable expiration dates
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Test codes before going live
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Monitor usage and effectiveness
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Use clear, descriptive names
+                    </li>
+                </ul>
+            </div>
+        </div>
+        
+        <!-- Quick Templates -->
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-magic me-2"></i>
+                Quick Templates
+            </div>
+            <div class="card-body">
+                <button class="btn btn-outline-primary btn-sm w-100 mb-2" onclick="fillTemplate('welcome')">
+                    Welcome Discount (10% off)
+                </button>
+                <button class="btn btn-outline-primary btn-sm w-100 mb-2" onclick="fillTemplate('sale')">
+                    Sale Discount (20% off)
+                </button>
+                <button class="btn btn-outline-primary btn-sm w-100 mb-2" onclick="fillTemplate('fixed')">
+                    Fixed Discount ($5 off)
+                </button>
+                <button class="btn btn-outline-primary btn-sm w-100 mb-2" onclick="fillTemplate('clearance')">
+                    Clearance (30% off)
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+$(document).ready(function() {
+    // Update discount help text based on type
+    $('#discount_type').on('change', function() {
+        let type = $(this).val();
+        let helpText = $('#discount_help');
+        
+        if (type === 'percentage') {
+            helpText.html('<i class="fas fa-info-circle me-1"></i>Enter percentage (e.g., 20 for 20% off)');
+        } else if (type === 'fixed') {
+            helpText.html('<i class="fas fa-info-circle me-1"></i>Enter dollar amount (e.g., 5.00 for $5 off)');
+        }
+        
+        updatePreview();
+    });
+    
+    // Update preview on input changes
+    $('#code, #description, #discount_value, #discount_type, input[name="is_store_wide"]').on('input change', function() {
+        updatePreview();
+    });
+    
+    // Form validation
+    $('form').on('submit', function(e) {
+        let isValid = true;
+        
+        // Check required fields
+        $(this).find('[required]').each(function() {
+            if (!$(this).val().trim()) {
+                $(this).addClass('is-invalid');
+                isValid = false;
+            } else {
+                $(this).removeClass('is-invalid');
+            }
+        });
+        
+        // Validate coupon code format
+        let code = $('#code').val().trim();
+        if (code && !/^[A-Z0-9]+$/i.test(code)) {
+            $('#code').addClass('is-invalid');
+            isValid = false;
+        }
+        
+        // Validate discount value
+        let discountValue = parseFloat($('#discount_value').val());
+        let discountType = $('#discount_type').val();
+        
+        if (discountType === 'percentage' && (discountValue <= 0 || discountValue > 100)) {
+            $('#discount_value').addClass('is-invalid');
+            isValid = false;
+        } else if (discountType === 'fixed' && discountValue <= 0) {
+            $('#discount_value').addClass('is-invalid');
+            isValid = false;
+        }
+        
+        if (!isValid) {
+            e.preventDefault();
+            alert('Please check the form for errors.');
+        }
+    });
+    
+    // Remove validation styling on input
+    $('input, select').on('input change', function() {
+        $(this).removeClass('is-invalid');
+    });
+    
+    function updatePreview() {
+        let code = $('#code').val() || 'COUPON CODE';
+        let description = $('#description').val() || 'Description will appear here';
+        let discountType = $('#discount_type').val();
+        let discountValue = $('#discount_value').val();
+        let isStoreWide = $('input[name="is_store_wide"]:checked').val() === '1';
+        
+        $('#preview_code').text(code.toUpperCase());
+        $('#preview_description').text(description);
+        
+        if (discountType && discountValue) {
+            if (discountType === 'percentage') {
+                $('#preview_discount').text(discountValue + '% OFF');
+            } else {
+                $('#preview_discount').text('$' + parseFloat(discountValue).toFixed(2) + ' OFF');
+            }
+        } else {
+            $('#preview_discount').text('DISCOUNT');
+        }
+        
+        $('#preview_scope').text(isStoreWide ? 'Store-wide coupon' : 'Product-specific coupon');
+    }
+    
+    // Initialize preview
+    updatePreview();
+});
+
+// Quick template functions
+function fillTemplate(type) {
+    switch(type) {
+        case 'welcome':
+            $('#code').val('WELCOME10');
+            $('#description').val('Welcome discount - 10% off your first purchase');
+            $('#discount_type').val('percentage');
+            $('#discount_value').val('10');
+            break;
+        case 'sale':
+            $('#code').val('SALE20');
+            $('#description').val('Sale discount - 20% off all items');
+            $('#discount_type').val('percentage');
+            $('#discount_value').val('20');
+            break;
+        case 'fixed':
+            $('#code').val('SAVE5');
+            $('#description').val('Save $5 on your purchase');
+            $('#discount_type').val('fixed');
+            $('#discount_value').val('5.00');
+            break;
+        case 'clearance':
+            $('#code').val('CLEAR30');
+            $('#description').val('Clearance sale - 30% off selected items');
+            $('#discount_type').val('percentage');
+            $('#discount_value').val('30');
+            break;
+    }
+    
+    // Trigger preview update
+    $('#discount_type').trigger('change');
+}
+</script>
+{% endblock %}

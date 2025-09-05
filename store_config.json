@@ -1,0 +1,15 @@
+{
+  "voice_id": "your-elevenlabs-voice-id",
+  "departments": {
+    "pharmacy": "555-1234",
+    "bakery": "555-5678",
+    "deli": "555-8765",
+    "customer service": "555-0000",
+    "grocery": "555-1111",
+    "meat & seafood": "555-2222",
+    "electronics": "555-3333",
+    "home and garden": "555-4444",
+    "health and beauty": "555-5555",
+    "clothing": "555-6666"
+  }
+}

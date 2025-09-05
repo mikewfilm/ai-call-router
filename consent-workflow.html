@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Consent Workflow - Mike Wilson Films</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #34495e;
+            margin-top: 30px;
+        }
+        .flow-step {
+            background: #ecf0f1;
+            padding: 20px;
+            margin: 15px 0;
+            border-left: 4px solid #3498db;
+            border-radius: 5px;
+        }
+        .consent-prompt {
+            background: #e8f5e8;
+            padding: 15px;
+            border: 2px solid #27ae60;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 16px;
+            margin: 15px 0;
+        }
+        .user-response {
+            background: #fff3cd;
+            padding: 15px;
+            border: 2px solid #ffc107;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        .outcome {
+            background: #d1ecf1;
+            padding: 15px;
+            border: 2px solid #17a2b8;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        .flow-diagram {
+            text-align: center;
+            margin: 30px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .step-number {
+            display: inline-block;
+            background: #3498db;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 30px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .arrow {
+            font-size: 24px;
+            color: #3498db;
+            margin: 10px 0;
+        }
+        .business-info {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📞 Consent Workflow Documentation</h1>
+        
+        <div class="business-info">
+            <h3>Business Information</h3>
+            <p><strong>Business:</strong> Mike Wilson Films</p>
+            <p><strong>Website:</strong> <a href="http://www.mikewilsonfilms.com/">www.mikewilsonfilms.com</a></p>
+            <p><strong>Contact:</strong> mikewfilm@gmail.com</p>
+            <p><strong>Use Case:</strong> Customer Care - Sending coupon codes via SMS</p>
+        </div>
+
+        <h2>🎯 Opt-In Process Overview</h2>
+        <p>This document outlines our verbal consent process for sending SMS messages containing coupon codes to customers who explicitly opt-in during phone calls.</p>
+
+        <div class="flow-diagram">
+            <h3>📋 Consent Flow Diagram</h3>
+            <div class="flow-step">
+                <span class="step-number">1</span>
+                <strong>Customer calls in</strong> and interacts with our voice system
+            </div>
+            <div class="arrow">↓</div>
+            <div class="flow-step">
+                <span class="step-number">2</span>
+                <strong>System offers coupon SMS</strong> with clear consent prompt
+            </div>
+            <div class="arrow">↓</div>
+            <div class="flow-step">
+                <span class="step-number">3</span>
+                <strong>Customer responds</strong> with "yes" or "no"
+            </div>
+            <div class="arrow">↓</div>
+            <div class="flow-step">
+                <span class="step-number">4</span>
+                <strong>System acts accordingly</strong> - sends SMS only if consent given
+            </div>
+        </div>
+
+        <h2>🔊 Detailed Consent Process</h2>
+
+        <h3>Step 1: Customer Interaction</h3>
+        <div class="flow-step">
+            <p>Customer calls our toll-free number <strong>(855) 592-4387</strong> and interacts with our voice system. The system processes their request and determines they may benefit from coupon information.</p>
+        </div>
+
+        <h3>Step 2: Consent Prompt</h3>
+        <div class="consent-prompt">
+            <strong>System plays this exact audio prompt:</strong><br><br>
+            <em>"I can send a text with your coupons now. Is it okay if I send a text to this number? Please say yes or no."</em>
+        </div>
+
+        <h3>Step 3: Customer Response</h3>
+        <div class="user-response">
+            <strong>Customer must explicitly respond:</strong><br><br>
+            • <strong>"Yes"</strong> = Consent granted, SMS will be sent<br>
+            • <strong>"No"</strong> = Consent denied, no SMS sent<br>
+            • Any other response = Treated as "no" for safety
+        </div>
+
+        <h3>Step 4: System Response</h3>
+        <div class="outcome">
+            <strong>If customer says "Yes":</strong><br>
+            • System responds: <em>"Thanks—I'll send that text now."</em><br>
+            • SMS is sent to the calling number with coupon information<br>
+            • Consent is logged for compliance purposes<br><br>
+            
+            <strong>If customer says "No" or anything else:</strong><br>
+            • System responds: <em>"No problem, I won't send a text."</em><br>
+            • No SMS is sent<br>
+            • No further contact attempted
+        </div>
+
+        <h2>📱 SMS Content</h2>
+        <div class="flow-step">
+            <p><strong>Message sent to customers who consent:</strong></p>
+            <div class="consent-prompt">
+                "Thanks! Here's a link to today's coupons: example.com/coupons"
+            </div>
+        </div>
+
+        <h2>✅ Compliance Features</h2>
+        <ul>
+            <li><strong>Explicit Consent:</strong> Customer must say "yes" to receive SMS</li>
+            <li><strong>Clear Language:</strong> Consent prompt clearly explains what will be sent</li>
+            <li><strong>Easy Opt-Out:</strong> Customer can simply say "no" to decline</li>
+            <li><strong>Single Purpose:</strong> SMS only contains coupon information as requested</li>
+            <li><strong>Consent Logging:</strong> All consent decisions are logged for compliance</li>
+            <li><strong>No Spam:</strong> SMS only sent to customers who explicitly request it</li>
+        </ul>
+
+        <h2>🔒 Privacy & Security</h2>
+        <div class="flow-step">
+            <p>• Phone numbers are only used for sending requested coupon SMS<br>
+            • No marketing messages sent without explicit consent<br>
+            • Customer can opt-out by saying "no" during the call<br>
+            • All consent decisions are logged for audit purposes<br>
+            • No personal information shared beyond coupon delivery</p>
+        </div>
+
+        <h2>📞 Contact Information</h2>
+        <div class="business-info">
+            <p><strong>For questions about this consent process:</strong></p>
+            <p>Email: mikewfilm@gmail.com<br>
+            Business: Mike Wilson Films<br>
+            Website: <a href="http://www.mikewilsonfilms.com/">www.mikewilsonfilms.com</a></p>
+        </div>
+
+        <hr style="margin: 40px 0;">
+        <p style="text-align: center; color: #7f8c8d; font-size: 14px;">
+            This consent workflow is designed to comply with TCPA and carrier requirements for toll-free SMS messaging.<br>
+            Last updated: August 2025
+        </p>
+    </div>
+</body>
+</html>

@@ -1,0 +1,185 @@
+# Each scenario describes: the caller's utterance and what we expect the IVR to do.
+# Your /voice endpoint should return TwiML. These tests just check for the right
+# TwiML fragments (e.g., <Say> hours </Say>, <Dial number="...">, <Record/>).
+
+- name: store_hours_today
+  intent: "What are your hours today?"
+  expected:
+    say_contains: ["open", "close", "today"]
+
+- name: holiday_hours
+  intent: "Are you open on Labor Day?"
+  expected:
+    say_contains: ["holiday", "hours"]
+
+- name: store_address
+  intent: "What's your address?"
+  expected:
+    say_contains: ["address", "street", "road"]
+
+- name: directions
+  intent: "How do I get there?"
+  expected:
+    say_contains: ["directions", "near", "cross"]
+
+- name: manager_request
+  intent: "Can I speak to the store manager?"
+  expected:
+    dial_any: true
+
+# ===== Product & inventory =====
+- name: product_generic
+  intent: "Do you have milk?"
+  expected:
+    clarify_or_route: true
+
+- name: product_brand
+  intent: "Do you carry Horizon organic milk?"
+  expected:
+    clarify_or_route: true
+
+- name: product_size
+  intent: "Do you sell 5 pound bags of rice?"
+  expected:
+    clarify_or_route: true
+
+- name: product_weird_item
+  intent: "Do you have gluten free sourdough?"
+  expected:
+    clarify_or_route: true
+
+# ===== Pharmacy =====
+- name: pharmacy_refill
+  intent: "I need to refill my prescription"
+  expected:
+    route_to_label: "pharmacy"
+
+- name: pharmacy_hours
+  intent: "What are the pharmacy hours?"
+  expected:
+    say_contains: ["pharmacy", "hours"]
+
+- name: pharmacist_human
+  intent: "Can I talk to the pharmacist?"
+  expected:
+    route_to_label: "pharmacy"
+
+- name: pharmacy_insurance
+  intent: "Do you take Blue Cross insurance?"
+  expected:
+    route_to_label: "pharmacy"
+
+# ===== Departments =====
+- name: deli_tray
+  intent: "Can I order a sandwich tray from the deli?"
+  expected:
+    route_to_label: "deli"
+
+- name: bakery_cake
+  intent: "Do you make birthday cakes?"
+  expected:
+    route_to_label: "bakery"
+
+- name: meat_special_cut
+  intent: "Can I get a special cut of beef?"
+  expected:
+    route_to_label: "meat"
+
+- name: produce_organic
+  intent: "Do you have organic avocados?"
+  expected:
+    route_to_label: "produce"
+
+- name: floral_balloons
+  intent: "Do you sell flowers or balloons?"
+  expected:
+    route_to_label: "floral"
+
+- name: customer_service_lost_item
+  intent: "I lost my wallet in the store"
+  expected:
+    route_to_label: "customer_service"
+
+# ===== Coupons / loyalty =====
+- name: coupons_today
+  intent: "What coupons are available today?"
+  expected:
+    say_contains: ["coupon", "deal", "special"]
+
+- name: loyalty_card
+  intent: "Can I use my loyalty card over the phone?"
+  expected:
+    say_contains: ["loyalty", "rewards"]
+
+# ===== Online orders / pickup =====
+- name: curbside_pickup
+  intent: "Do you do curbside pickup?"
+  expected:
+    say_contains: ["curbside", "pickup"]
+
+- name: change_pickup_time
+  intent: "Can I change my pickup time?"
+  expected:
+    route_to_label: "customer_service"
+
+- name: instacart_issue
+  intent: "My Instacart order is late"
+  expected:
+    say_contains: ["Instacart", "order"]
+
+# ===== Payments & services =====
+- name: apple_pay
+  intent: "Do you accept Apple Pay?"
+  expected:
+    say_contains: ["Apple Pay", "contactless"]
+
+- name: ebt
+  intent: "Do you take EBT?"
+  expected:
+    say_contains: ["EBT", "SNAP"]
+
+# ===== Returns & policies =====
+- name: return_policy
+  intent: "What is your return policy?"
+  expected:
+    say_contains: ["return", "policy"]
+
+- name: return_without_receipt
+  intent: "Can I return without a receipt?"
+  expected:
+    say_contains: ["return", "receipt"]
+
+# ===== After hours =====
+- name: after_hours_voicemail
+  intent: "Hello?"
+  context:
+    force_after_hours: true
+  expected:
+    say_contains: ["currently closed", "hours"]
+    record: true
+
+# ===== Edge cases =====
+- name: accent_slang
+  intent: "Y'all got pop?"
+  expected:
+    clarify_or_route: true
+
+- name: mispronunciation
+  intent: "Do you have tor-till-uhs?"
+  expected:
+    clarify_or_route: true
+
+- name: multiple_items
+  intent: "Do you have milk, bread and eggs?"
+  expected:
+    clarify_or_route: true
+
+- name: angry_human_request
+  intent: "I want a human right now!"
+  expected:
+    dial_any: true
+
+- name: off_topic
+  intent: "Is this Pizza Hut?"
+  expected:
+    say_contains: ["This is", "grocery", "store"]

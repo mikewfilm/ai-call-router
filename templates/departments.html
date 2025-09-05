@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}Departments - Store Management{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>
+                <i class="fas fa-sitemap me-2"></i>
+                Departments
+            </h1>
+            <a href="{{ url_for('add_department') }}" class="btn btn-primary">
+                <i class="fas fa-plus me-2"></i>
+                Add Department
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Departments Grid -->
+<div class="row">
+    {% for dept in departments %}
+    <div class="col-md-6 col-lg-4 mb-4">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0">
+                    <i class="fas fa-sitemap me-2"></i>
+                    {{ dept.name }}
+                </h6>
+                <div class="dropdown">
+                    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                        <i class="fas fa-ellipsis-v"></i>
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="#"><i class="fas fa-edit me-2"></i>Edit</a></li>
+                        <li><a class="dropdown-item" href="#"><i class="fas fa-eye me-2"></i>View Details</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item text-danger" href="#"><i class="fas fa-trash me-2"></i>Delete</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <strong>Extension:</strong> 
+                    {% if dept.phone_extension %}
+                        <span class="badge bg-primary">{{ dept.phone_extension }}</span>
+                    {% else %}
+                        <span class="text-muted">Not set</span>
+                    {% endif %}
+                </div>
+                
+                {% if dept.description %}
+                <div class="mb-3">
+                    <strong>Description:</strong>
+                    <p class="text-muted small mb-0">{{ dept.description }}</p>
+                </div>
+                {% endif %}
+                
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="badge {% if dept.is_active %}bg-success{% else %}bg-secondary{% endif %}">
+                        {% if dept.is_active %}Active{% else %}Inactive{% endif %}
+                    </span>
+                    <small class="text-muted">Created: {{ dept.created_at if dept.created_at is string else dept.created_at.strftime('%m/%d/%Y') }}</small>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% if not departments %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body text-center py-5">
+                <i class="fas fa-sitemap fa-3x text-muted mb-3"></i>
+                <h5 class="text-muted">No departments configured</h5>
+                <p class="text-muted">Get started by adding your first department.</p>
+                <a href="{{ url_for('add_department') }}" class="btn btn-primary">
+                    <i class="fas fa-plus me-2"></i>
+                    Add First Department
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Department Statistics -->
+{% if departments %}
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-chart-bar me-2"></i>
+                Department Overview
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3 text-center">
+                        <h4 class="text-primary">{{ departments|length }}</h4>
+                        <p class="text-muted mb-0">Total Departments</p>
+                    </div>
+                    <div class="col-md-3 text-center">
+                        <h4 class="text-success">{{ departments|selectattr('is_active', '==', true)|list|length }}</h4>
+                        <p class="text-muted mb-0">Active Departments</p>
+                    </div>
+                    <div class="col-md-3 text-center">
+                        <h4 class="text-warning">{{ departments|selectattr('phone_extension', '!=', '')|list|length }}</h4>
+                        <p class="text-muted mb-0">With Extensions</p>
+                    </div>
+                    <div class="col-md-3 text-center">
+                        <h4 class="text-info">{{ departments|selectattr('description', '!=', '')|list|length }}</h4>
+                        <p class="text-muted mb-0">With Descriptions</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

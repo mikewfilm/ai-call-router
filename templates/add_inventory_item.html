@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+
+{% block title %}Add Inventory Item - Store Management{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>
+                <i class="fas fa-plus me-2"></i>
+                Add New Inventory Item
+            </h1>
+            <a href="{{ url_for('inventory_page') }}" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left me-2"></i>
+                Back to Inventory
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-edit me-2"></i>
+                Item Information
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="sku" class="form-label">
+                                <i class="fas fa-barcode me-2"></i>
+                                SKU *
+                            </label>
+                            <input type="text" class="form-control" id="sku" name="sku" 
+                                   placeholder="e.g., GROC-001" required>
+                            <div class="form-text">
+                                <i class="fas fa-info-circle me-1"></i>
+                                Unique identifier for the item
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label for="name" class="form-label">
+                                <i class="fas fa-tag me-2"></i>
+                                Item Name *
+                            </label>
+                            <input type="text" class="form-control" id="name" name="name" 
+                                   placeholder="e.g., Organic Bananas" required>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="department" class="form-label">
+                                <i class="fas fa-sitemap me-2"></i>
+                                Department *
+                            </label>
+                            <select class="form-control" id="department" name="department" required>
+                                <option value="">Select Department</option>
+                                {% for dept in departments %}
+                                <option value="{{ dept.name }}">{{ dept.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label for="price" class="form-label">
+                                <i class="fas fa-dollar-sign me-2"></i>
+                                Price ($) *
+                            </label>
+                            <input type="number" class="form-control" id="price" name="price" 
+                                   min="0" step="0.01" placeholder="0.00" required>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="quantity" class="form-label">
+                                <i class="fas fa-boxes me-2"></i>
+                                Initial Quantity *
+                            </label>
+                            <input type="number" class="form-control" id="quantity" name="quantity" 
+                                   min="0" placeholder="0" required>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label for="location" class="form-label">
+                                <i class="fas fa-map-marker-alt me-2"></i>
+                                Location
+                            </label>
+                            <input type="text" class="form-control" id="location" name="location" 
+                                   placeholder="e.g., Aisle 3, Shelf B">
+                            <div class="form-text">
+                                <i class="fas fa-info-circle me-1"></i>
+                                Aisle/bin assignment for easy finding
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="is_featured" name="is_featured">
+                            <label class="form-check-label" for="is_featured">
+                                <i class="fas fa-star me-2"></i>
+                                Mark as Featured Item
+                            </label>
+                        </div>
+                        <div class="form-text">
+                            <i class="fas fa-info-circle me-1"></i>
+                            Featured items are prioritized by the AI when customers ask for recommendations
+                        </div>
+                    </div>
+                    
+                    <div class="d-flex justify-content-between">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-2"></i>
+                            Add Item
+                        </button>
+                        <a href="{{ url_for('inventory_page') }}" class="btn btn-outline-secondary">
+                            Cancel
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <!-- Quick Add Tips -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="fas fa-lightbulb me-2"></i>
+                Quick Add Tips
+            </div>
+            <div class="card-body">
+                <ul class="list-unstyled">
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Use descriptive SKUs (e.g., GROC-BANANA-ORG)
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Include brand names in item names
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Set accurate initial quantities
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Use consistent location formats
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        Mark popular items as featured
+                    </li>
+                </ul>
+            </div>
+        </div>
+        
+        <!-- Department Reference -->
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-sitemap me-2"></i>
+                Available Departments
+            </div>
+            <div class="card-body">
+                {% for dept in departments %}
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="badge bg-secondary">{{ dept.name }}</span>
+                    {% if dept.phone_extension %}
+                    <small class="text-muted">Ext: {{ dept.phone_extension }}</small>
+                    {% endif %}
+                </div>
+                {% endfor %}
+                
+                {% if not departments %}
+                <p class="text-muted text-center">
+                    <i class="fas fa-info-circle me-2"></i>
+                    No departments configured yet
+                </p>
+                <a href="{{ url_for('add_department') }}" class="btn btn-outline-primary btn-sm">
+                    <i class="fas fa-plus me-2"></i>
+                    Add Department
+                </a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk Import Section -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-upload me-2"></i>
+                Bulk Import (Coming Soon)
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-8">
+                        <p class="text-muted">
+                            <i class="fas fa-info-circle me-2"></i>
+                            Import multiple inventory items from CSV or Excel files. This feature will be available in the next update.
+                        </p>
+                        <div class="alert alert-info">
+                            <i class="fas fa-tools me-2"></i>
+                            <strong>Coming Soon:</strong> Bulk import functionality will allow you to upload spreadsheets with multiple items at once.
+                        </div>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <button class="btn btn-outline-primary" disabled>
+                            <i class="fas fa-upload me-2"></i>
+                            Upload File
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+$(document).ready(function() {
+    // Form validation
+    $('form').on('submit', function(e) {
+        let isValid = true;
+        
+        // Check required fields
+        $(this).find('[required]').each(function() {
+            if (!$(this).val().trim()) {
+                $(this).addClass('is-invalid');
+                isValid = false;
+            } else {
+                $(this).removeClass('is-invalid');
+            }
+        });
+        
+        // Validate SKU format
+        let sku = $('#sku').val().trim();
+        if (sku && !/^[A-Z0-9\-_]+$/i.test(sku)) {
+            $('#sku').addClass('is-invalid');
+            isValid = false;
+        }
+        
+        // Validate price
+        let price = parseFloat($('#price').val());
+        if (price < 0) {
+            $('#price').addClass('is-invalid');
+            isValid = false;
+        }
+        
+        // Validate quantity
+        let quantity = parseInt($('#quantity').val());
+        if (quantity < 0) {
+            $('#quantity').addClass('is-invalid');
+            isValid = false;
+        }
+        
+        if (!isValid) {
+            e.preventDefault();
+            alert('Please check the form for errors.');
+        }
+    });
+    
+    // Remove validation styling on input
+    $('input, select').on('input change', function() {
+        $(this).removeClass('is-invalid');
+    });
+    
+    // Auto-generate SKU from name
+    $('#name').on('blur', function() {
+        let name = $(this).val().trim();
+        let sku = $('#sku').val().trim();
+        
+        if (name && !sku) {
+            // Generate a simple SKU from the name
+            let generatedSku = name.toUpperCase()
+                .replace(/[^A-Z0-9]/g, '-')
+                .replace(/-+/g, '-')
+                .replace(/^-|-$/g, '')
+                .substring(0, 10);
+            
+            if (generatedSku) {
+                $('#sku').val(generatedSku);
+            }
+        }
+    });
+    
+    // Price formatting
+    $('#price').on('blur', function() {
+        let price = parseFloat($(this).val());
+        if (!isNaN(price)) {
+            $(this).val(price.toFixed(2));
+        }
+    });
+});
+</script>
+{% endblock %}

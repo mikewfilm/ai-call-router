@@ -1,0 +1,62 @@
+{
+  "general": {
+    "greet": "Thanks for calling. What can I help you find today?",
+    "confirm_prefix": "Got it\u2014did you say:",
+    "yes_no": "Sorry, was that a yes or a no?",
+    "err_global": "Sorry, we hit a snag. Please call back in a moment.",
+    "err_confirm": "Sorry, we had trouble processing that. Goodbye.",
+    "no_record": "Sorry, we did not get your message. Goodbye.",
+    "reask": "No problem\u2014please tell me again what you're looking for.",
+    "reask_cap": "No worries\u2014tell me again what you need so I get it right.",
+    "connecting_operator": "Connecting you to an operator now. Thanks for calling.",
+    "timeout": "I've been helping you for a while now. Thank you for calling, and have a nice day!",
+    "thanks_calling": "Thanks for calling!",
+    "goodbye": "Thanks for calling, have a nice day!",
+    "error_goodbye": "Sorry, there was an error. Goodbye.",
+    "error_processing": "Sorry, there was an error processing your request. Please try again.",
+    "no_speech": "I didn't hear a response. Please call back and try again. Goodbye.",
+    "hit_snag": "Sorry, we hit a snag.",
+    "connect_manager": "I'll connect you to the manager now alright.",
+    "anything_else": "Is there anything else I can help you with today?"
+  },
+  "pharmacy": {
+    "prescription_ready": "Your prescription for {medication} is ready for pickup!",
+    "prescription_processing": "Your prescription for {medication} is being processed and should be ready in about 15-20 minutes.",
+    "prescription_delayed": "Your prescription for {medication} has been delayed. We're waiting for additional information from your doctor.",
+    "prescription_out_of_stock": "Your prescription for {medication} is out of stock. We've ordered more and expect it in 2-3 business days.",
+    "no_prescriptions_found": "I couldn't find any prescriptions with that phone number. Please check the number or provide your RX number. Would you like me to connect you to our pharmacy staff to help?",
+    "no_rx_found": "I couldn't find a prescription with that RX number. Please check the number and try again. Would you like me to connect you to our pharmacy staff to help?",
+    "transfer_from_pharmacy": "I can help you transfer your prescription from {pharmacy}. I'll need your RX number and the name of the medication. Let me connect you to our pharmacy staff to complete the transfer.",
+    "transfer_general": "I can help you transfer your prescription. I'll need to know which pharmacy you're transferring from and your RX number. Let me connect you to our pharmacy staff.",
+    "status_check_prompt": "I'd be happy to check your prescription status. Could you please provide your RX number or phone number?",
+    "refill_prompt": "I found your prescriptions, but none are currently being processed. Would you like to request a refill?",
+    "pharmacy_greeting": "Thanks for calling the pharmacy. I can help with prescription refills, medical supply inventory, etc. How can I help?",
+    "connect_pharmacist": "I'll connect you to our pharmacist now thank you.",
+    "connect_pharmacy_staff": "I'll connect you to our pharmacy staff now."
+  },
+  "coupons": {
+    "coupons_available": "Yes, we have coupons available today. What department are you shopping in?",
+    "no_coupons_for_item": "I don't see any current coupons available for {item}. However, we do have some general store coupons that might help you save on your overall purchase.",
+    "no_specific_coupons": "I don't see any specific coupons for that item, but we do have several store-wide promotions available.",
+    "department_coupons_intro": "Here are the current {department} coupons available. ",
+    "no_department_coupons": "I don't see any specific {department} coupons for {item} right now, but you can check our weekly ad for current specials.",
+    "help_find_coupons": "I can help you find {department} coupons. Please check our weekly ad or ask a store associate for current specials.",
+    "coupon_replay_prompt": "To hear these coupons again, say repeat or press any key.",
+    "coupon_replay_thanks": "Thanks for calling!",
+    "sms_consent_prompt": "I can send a text with your coupons now. Is it okay if I send a text to this number? Please say yes or no.",
+    "sms_consent_thanks_yes": "Thanks\u2014I'll send that text now.",
+    "sms_consent_thanks_no": "No problem, I won't send a text.",
+    "sms_body": "Thanks! Here are today's coupons: \r\n30% off Spelt Flour! SPELT30\r\n50% off Tahini THNI50"
+  },
+  "spanish": {
+    "greet": "Gracias por llamar. \u00bfQu\u00e9 puedo ayudarle a encontrar hoy?",
+    "confirm_prefix": "Entendido\u2014\u00bfdijo:",
+    "yes_no": "Perd\u00f3n, \u00bffue un s\u00ed o un no?",
+    "err_global": "Lo sentimos, hubo un problema. Por favor, vuelva a llamar en un momento.",
+    "err_confirm": "Lo sentimos, hubo un problema con su respuesta. Adi\u00f3s.",
+    "no_record": "Lo sentimos, no recibimos su mensaje. Adi\u00f3s.",
+    "reask": "No hay problema\u2014d\u00edgame otra vez qu\u00e9 est\u00e1 buscando.",
+    "reask_cap": "Sin problema\u2014rep\u00edtame lo que necesita para acertar.",
+    "connecting_operator": "Le conecto con un operador ahora. Gracias por llamar."
+  }
+}

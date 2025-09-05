@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="fas fa-cog me-2"></i>System Settings</h1>
+</div>
+
+<div class="row">
+    <!-- AI Configuration -->
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-robot me-2"></i>
+                AI Configuration
+            </div>
+            <div class="card-body">
+                <form>
+                    <div class="mb-3">
+                        <label class="form-label">AI Model</label>
+                        <select class="form-select">
+                            <option>GPT-4 (Recommended)</option>
+                            <option>GPT-3.5 Turbo</option>
+                            <option>Claude-3</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Response Style</label>
+                        <select class="form-select">
+                            <option>Professional</option>
+                            <option>Friendly</option>
+                            <option>Casual</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Confidence Threshold</label>
+                        <input type="range" class="form-range" min="0" max="100" value="75">
+                        <small class="text-muted">75% - Only route calls when AI is 75% confident</small>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="enableFallback" checked>
+                            <label class="form-check-label" for="enableFallback">
+                                Enable Rule-based Fallback
+                            </label>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Save AI Settings</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Voice Settings -->
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-microphone me-2"></i>
+                Voice Settings
+            </div>
+            <div class="card-body">
+                <form>
+                    <div class="mb-3">
+                        <label class="form-label">Voice Provider</label>
+                        <select class="form-select">
+                            <option>ElevenLabs (Current)</option>
+                            <option>Amazon Polly</option>
+                            <option>Google Text-to-Speech</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Voice Style</label>
+                        <select class="form-select">
+                            <option selected>Burt Reynolds™ (Current)</option>
+                            <option>Professional Female</option>
+                            <option>Professional Male</option>
+                            <option>Friendly Female</option>
+                            <option>Friendly Male</option>
+                        </select>
+                        <small class="text-muted">
+                            <i class="fas fa-info-circle me-1"></i>
+                            Currently using: Burt Reynolds™ - ElevenLabs' Iconic Voice
+                        </small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Speaking Rate</label>
+                        <input type="range" class="form-range" min="0.5" max="2.0" step="0.1" value="1.0">
+                        <small class="text-muted">1.0x - Normal speed</small>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="enableVoiceCache" checked>
+                            <label class="form-check-label" for="enableVoiceCache">
+                                Enable Voice Caching (Save Credits)
+                            </label>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Save Voice Settings</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- System Preferences -->
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-sliders-h me-2"></i>
+                System Preferences
+            </div>
+            <div class="card-body">
+                <form>
+                    <div class="mb-3">
+                        <label class="form-label">Default Language</label>
+                        <select class="form-select">
+                            <option>English (US)</option>
+                            <option>Spanish</option>
+                            <option>French</option>
+                            <option>German</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Time Zone</label>
+                        <select class="form-select">
+                            <option>Eastern Time (ET)</option>
+                            <option>Central Time (CT)</option>
+                            <option>Mountain Time (MT)</option>
+                            <option>Pacific Time (PT)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="enableNotifications" checked>
+                            <label class="form-check-label" for="enableNotifications">
+                                Enable Email Notifications
+                            </label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="enableAuditLog" checked>
+                            <label class="form-check-label" for="enableAuditLog">
+                                Enable Audit Logging
+                            </label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="enableBackup" checked>
+                            <label class="form-check-label" for="enableBackup">
+                                Automatic Daily Backups
+                            </label>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Save Preferences</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Security Settings -->
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-shield-alt me-2"></i>
+                Security Settings
+            </div>
+            <div class="card-body">
+                <form>
+                    <div class="mb-3">
+                        <label class="form-label">Session Timeout</label>
+                        <select class="form-select">
+                            <option>15 minutes</option>
+                            <option>30 minutes</option>
+                            <option>1 hour</option>
+                            <option>4 hours</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="require2FA">
+                            <label class="form-check-label" for="require2FA">
+                                Require Two-Factor Authentication
+                            </label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="enableIPWhitelist">
+                            <label class="form-check-label" for="enableIPWhitelist">
+                                Enable IP Address Whitelist
+                            </label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">API Key</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" value="sk-1234567890abcdef" readonly>
+                            <button class="btn btn-outline-secondary" type="button">Show</button>
+                            <button class="btn btn-outline-secondary" type="button">Regenerate</button>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Save Security Settings</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- System Information -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-info-circle me-2"></i>
+                System Information
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3">
+                        <strong>Version:</strong><br>
+                        <span class="text-muted">v2.1.0</span>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Last Updated:</strong><br>
+                        <span class="text-muted">August 24, 2025</span>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Database Size:</strong><br>
+                        <span class="text-muted">2.4 MB</span>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Uptime:</strong><br>
+                        <span class="text-muted">14 days, 6 hours</span>
+                    </div>
+                </div>
+                <hr>
+                <div class="row">
+                    <div class="col-md-6">
+                        <button class="btn btn-outline-primary me-2">
+                            <i class="fas fa-download me-2"></i>Export Settings
+                        </button>
+                        <button class="btn btn-outline-secondary me-2">
+                            <i class="fas fa-upload me-2"></i>Import Settings
+                        </button>
+                    </div>
+                    <div class="col-md-6 text-end">
+                        <button class="btn btn-outline-warning me-2">
+                            <i class="fas fa-redo me-2"></i>Reset to Defaults
+                        </button>
+                        <button class="btn btn-outline-danger">
+                            <i class="fas fa-trash me-2"></i>Clear All Data
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Coming Soon Notice -->
+<div class="row">
+    <div class="col-12">
+        <div class="alert alert-info">
+            <i class="fas fa-info-circle me-2"></i>
+            <strong>Advanced Settings Coming Soon!</strong> We're working on user management, role-based permissions, and advanced integration options.
+        </div>
+    </div>
+</div>
+{% endblock %}

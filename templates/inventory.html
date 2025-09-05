@@ -1,0 +1,451 @@
+{% extends "base.html" %}
+
+{% block title %}Inventory Management - Store Management{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>
+                <i class="fas fa-boxes me-2"></i>
+                Inventory Management
+            </h1>
+            <a href="{{ url_for('add_inventory_item') }}" class="btn btn-primary">
+                <i class="fas fa-plus me-2"></i>
+                Add New Item
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Search and Filters -->
+<div class="row mb-4">
+    <div class="col-md-8">
+        <div class="search-box">
+            <i class="fas fa-search"></i>
+            <input type="text" class="form-control" id="searchInput" placeholder="Search by SKU, name, or department...">
+        </div>
+    </div>
+    <div class="col-md-4">
+        <select class="form-control" id="departmentFilter">
+            <option value="">All Departments</option>
+            <option value="Grocery">Grocery</option>
+            <option value="Meat & Seafood">Meat & Seafood</option>
+            <option value="Deli">Deli</option>
+            <option value="Bakery">Bakery</option>
+            <option value="Electronics">Electronics</option>
+            <option value="Home and Garden">Home and Garden</option>
+            <option value="Health and Beauty">Health and Beauty</option>
+            <option value="Pet Supplies">Pet Supplies</option>
+            <option value="Customer Service">Customer Service</option>
+        </select>
+    </div>
+</div>
+
+<!-- Inventory API Integration -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-plug me-2"></i>
+                Inventory API Integration
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('save_inventory_integration') }}" class="mb-3">
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <label class="form-label">Provider</label>
+                            <select name="provider" class="form-control">
+                                {% set inv = (settings.get('integrations', {}).get('inventory', {}) if settings else {}) %}
+                                <option value="walmart" {% if inv.get('provider')=='walmart' %}selected{% endif %}>Walmart</option>
+                                <option value="kroger" {% if inv.get('provider')=='kroger' %}selected{% endif %}>Kroger</option>
+                                <option value="target" {% if inv.get('provider')=='target' %}selected{% endif %}>Target</option>
+                                <option value="custom" {% if inv.get('provider')=='custom' %}selected{% endif %}>Custom</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Base URL</label>
+                            <input type="url" class="form-control" name="base_url" placeholder="https://api.example.com" value="{{ inv.get('base_url','') }}">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Store ID</label>
+                            <input type="text" class="form-control" name="store_id" value="{{ inv.get('store_id','') }}">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Provider Key</label>
+                            <input type="text" class="form-control" name="api_key" value="{{ inv.get('api_key','') }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Provider Secret</label>
+                            <input type="password" class="form-control" name="api_secret" value="{{ inv.get('api_secret','') }}">
+                        </div>
+                    </div>
+                    <div class="mt-3 d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-2"></i> Save Integration
+                        </button>
+                        <button type="button" id="testIntegration" class="btn btn-outline-secondary">
+                            <i class="fas fa-vial me-2"></i> Test Connection
+                        </button>
+                        <span id="testStatus" class="ms-2 small text-muted"></span>
+                    </div>
+                </form>
+                <div class="form-text">
+                    Add your store’s inventory API credentials. When connected, searches can hit your live catalog.
+                </div>
+            </div>
+        </div>
+    </div>
+    
+</div>
+<!-- Inventory Stats -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h4 class="text-primary">{{ items|length }}</h4>
+                <p class="text-muted mb-0">Total Items</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h4 class="text-warning">{{ items|selectattr('stock_quantity', '<', 10)|list|length }}</h4>
+                <p class="text-muted mb-0">Low Stock</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h4 class="text-danger">{{ items|selectattr('stock_quantity', '==', 0)|list|length }}</h4>
+                <p class="text-muted mb-0">Out of Stock</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h4 class="text-success">{{ items|selectattr('is_featured', '==', true)|list|length }}</h4>
+                <p class="text-muted mb-0">Featured Items</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Inventory Table -->
+<div class="card">
+    <div class="card-header">
+        <i class="fas fa-list me-2"></i>
+        Inventory Items
+    </div>
+    <div class="card-body">
+        {% if items %}
+        <div class="table-responsive">
+            <table class="table table-hover" id="inventoryTable">
+                <thead>
+                    <tr>
+                        <th>SKU</th>
+                        <th>Name</th>
+                        <th>Department</th>
+                        <th>Price</th>
+                        <th>Quantity</th>
+                        <th>Location</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr data-sku="{{ item.sku }}" data-name="{{ item.name }}" data-department="{{ item.department }}">
+                        <td>
+                            <strong>{{ item.sku }}</strong>
+                            {% if item.is_featured %}
+                                <i class="fas fa-star text-warning ms-1" title="Featured Item"></i>
+                            {% endif %}
+                        </td>
+                        <td>{{ item.name }}</td>
+                        <td>
+                            <span class="badge bg-secondary">{{ item.department }}</span>
+                        </td>
+                        <td>${{ "%.2f"|format(item.price) }}</td>
+                        <td>
+                            <span class="quantity-display" data-item-id="{{ item.id }}">
+                                {{ item.stock_quantity }}
+                            </span>
+                            {% if item.stock_quantity < 10 and item.stock_quantity > 0 %}
+                                <i class="fas fa-exclamation-triangle text-warning ms-1" title="Low Stock"></i>
+                            {% elif item.stock_quantity == 0 %}
+                                <i class="fas fa-times-circle text-danger ms-1" title="Out of Stock"></i>
+                            {% endif %}
+                        </td>
+                        <td>{{ item.location or 'Not specified' }}</td>
+                        <td>
+                            {% if item.is_active %}
+                                <span class="status-indicator status-active"></span>
+                                Active
+                            {% else %}
+                                <span class="status-indicator status-inactive"></span>
+                                Inactive
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="btn-group btn-group-sm" role="group">
+                                <button type="button" class="btn btn-outline-primary edit-item" 
+                                        data-item-id="{{ item.id }}" title="Edit">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-success quick-edit" 
+                                        data-item-id="{{ item.id }}" title="Quick Edit">
+                                    <i class="fas fa-pen"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-info view-details" 
+                                        data-item-id="{{ item.id }}" title="View Details">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-5">
+            <i class="fas fa-box-open fa-3x text-muted mb-3"></i>
+            <h5 class="text-muted">No inventory items found</h5>
+            <p class="text-muted">Get started by adding your first inventory item.</p>
+            <a href="{{ url_for('add_inventory_item') }}" class="btn btn-primary">
+                <i class="fas fa-plus me-2"></i>
+                Add First Item
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Quick Edit Modal -->
+<div class="modal fade" id="quickEditModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-pen me-2"></i>
+                    Quick Edit Item
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="quickEditForm">
+                    <input type="hidden" id="editItemId">
+                    <div class="mb-3">
+                        <label for="editQuantity" class="form-label">Quantity</label>
+                        <input type="number" class="form-control" id="editQuantity" min="0" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="editPrice" class="form-label">Price ($)</label>
+                        <input type="number" class="form-control" id="editPrice" min="0" step="0.01" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="editLocation" class="form-label">Location</label>
+                        <input type="text" class="form-control" id="editLocation" placeholder="Aisle/Bin">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="saveQuickEdit">
+                    <i class="fas fa-save me-2"></i>
+                    Save Changes
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Item Details Modal -->
+<div class="modal fade" id="itemDetailsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-eye me-2"></i>
+                    Item Details
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="itemDetailsContent">
+                <!-- Content will be loaded dynamically -->
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+$(document).ready(function() {
+    // Search functionality
+    $('#searchInput').on('keyup', function() {
+        let searchTerm = $(this).val().toLowerCase();
+        let departmentFilter = $('#departmentFilter').val();
+        
+        $('#inventoryTable tbody tr').each(function() {
+            let sku = $(this).data('sku').toLowerCase();
+            let name = $(this).data('name').toLowerCase();
+            let department = $(this).data('department');
+            
+            let matchesSearch = sku.includes(searchTerm) || name.includes(searchTerm);
+            let matchesDepartment = !departmentFilter || department === departmentFilter;
+            
+            if (matchesSearch && matchesDepartment) {
+                $(this).show();
+            } else {
+                $(this).hide();
+            }
+        });
+    });
+    
+    // Department filter
+    $('#departmentFilter').on('change', function() {
+        $('#searchInput').trigger('keyup');
+    });
+    
+    // Quick edit functionality
+    $('.quick-edit').on('click', function() {
+        let itemId = $(this).data('item-id');
+        let row = $(this).closest('tr');
+        
+        // Populate modal with current values
+        $('#editItemId').val(itemId);
+        $('#editQuantity').val(row.find('td:eq(4) .quantity-display').text().trim());
+        $('#editPrice').val(row.find('td:eq(3)').text().replace('$', ''));
+        $('#editLocation').val(row.find('td:eq(5)').text().replace('Not specified', ''));
+        
+        $('#quickEditModal').modal('show');
+    });
+    
+    // Save quick edit
+    $('#saveQuickEdit').on('click', function() {
+        let itemId = $('#editItemId').val();
+        let data = {
+            quantity: parseInt($('#editQuantity').val()),
+            price: parseFloat($('#editPrice').val()),
+            location: $('#editLocation').val()
+        };
+        
+        $.ajax({
+            url: `/api/inventory/${itemId}`,
+            method: 'PUT',
+            contentType: 'application/json',
+            data: JSON.stringify(data),
+            success: function(response) {
+                if (response.success) {
+                    // Update the table row
+                    let row = $(`[data-item-id="${itemId}"]`).closest('tr');
+                    row.find('td:eq(3)').text('$' + data.price.toFixed(2));
+                    row.find('td:eq(4) .quantity-display').text(data.quantity);
+                    row.find('td:eq(5)').text(data.location || 'Not specified');
+                    
+                    // Update status indicators
+                    let quantityCell = row.find('td:eq(4)');
+                    quantityCell.find('i').remove();
+                    
+                    if (data.quantity < 10 && data.quantity > 0) {
+                        quantityCell.append('<i class="fas fa-exclamation-triangle text-warning ms-1" title="Low Stock"></i>');
+                    } else if (data.quantity == 0) {
+                        quantityCell.append('<i class="fas fa-times-circle text-danger ms-1" title="Out of Stock"></i>');
+                    }
+                    
+                    $('#quickEditModal').modal('hide');
+                    
+                    // Show success message
+                    $('<div class="alert alert-success alert-dismissible fade show" role="alert">')
+                        .html('<i class="fas fa-check-circle me-2"></i>Item updated successfully!')
+                        .append('<button type="button" class="btn-close" data-bs-dismiss="alert"></button>')
+                        .insertAfter('.row:first')
+                        .delay(3000)
+                        .fadeOut();
+                }
+            },
+            error: function() {
+                alert('Error updating item. Please try again.');
+            }
+        });
+    });
+    
+    // View item details
+    $('.view-details').on('click', function() {
+        let itemId = $(this).data('item-id');
+        let row = $(this).closest('tr');
+        
+        let details = {
+            sku: row.find('td:eq(0) strong').text(),
+            name: row.find('td:eq(1)').text(),
+            department: row.find('td:eq(2) .badge').text(),
+            price: row.find('td:eq(3)').text(),
+            quantity: row.find('td:eq(4) .quantity-display').text(),
+            location: row.find('td:eq(5)').text(),
+            status: row.find('td:eq(6)').text().trim()
+        };
+        
+        let content = `
+            <div class="row">
+                <div class="col-md-6">
+                    <h6>Basic Information</h6>
+                    <table class="table table-sm">
+                        <tr><td><strong>SKU:</strong></td><td>${details.sku}</td></tr>
+                        <tr><td><strong>Name:</strong></td><td>${details.name}</td></tr>
+                        <tr><td><strong>Department:</strong></td><td>${details.department}</td></tr>
+                        <tr><td><strong>Price:</strong></td><td>${details.price}</td></tr>
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <h6>Inventory Details</h6>
+                    <table class="table table-sm">
+                        <tr><td><strong>Quantity:</strong></td><td>${details.quantity}</td></tr>
+                        <tr><td><strong>Location:</strong></td><td>${details.location}</td></tr>
+                        <tr><td><strong>Status:</strong></td><td>${details.status}</td></tr>
+                        <tr><td><strong>Last Updated:</strong></td><td>Just now</td></tr>
+                    </table>
+                </div>
+            </div>
+        `;
+        
+        $('#itemDetailsContent').html(content);
+        $('#itemDetailsModal').modal('show');
+    });
+
+    // Test inventory integration
+    $('#testIntegration').on('click', function() {
+        const form = $(this).closest('form');
+        const data = {
+            provider: form.find('select[name="provider"]').val(),
+            base_url: form.find('input[name="base_url"]').val(),
+            api_key: form.find('input[name="api_key"]').val()
+        };
+        const btn = $(this);
+        const status = $('#testStatus');
+        const original = btn.html();
+        status.removeClass('text-success text-danger').text('');
+        btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1"></span>Testing');
+        fetch('{{ url_for('test_inventory_integration') }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams(data)
+        }).then(r => r.json()).then(j => {
+            if (j.ok) {
+                status.addClass('text-success').text('Connection OK (status ' + j.status + ')');
+            } else {
+                status.addClass('text-danger').text('Test failed: ' + (j.error || 'unknown error'));
+            }
+        }).catch(err => {
+            status.addClass('text-danger').text('Test error: ' + err);
+        }).finally(() => {
+            btn.prop('disabled', false).html(original);
+        });
+    });
+});
+</script>
+{% endblock %}

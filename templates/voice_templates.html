@@ -1,0 +1,335 @@
+{% extends "base.html" %}
+
+{% block title %}Voice Templates - Store Management{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>
+                <i class="fas fa-microphone me-2"></i>
+                Voice Templates
+            </h1>
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#generateTemplateModal">
+                <i class="fas fa-plus me-2"></i>
+                Generate New Template
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Voice Template Stats -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h4 class="text-primary">{{ templates|length }}</h4>
+                <p class="text-muted mb-0">Total Templates</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h4 class="text-success">{{ templates|selectattr('is_active', '==', true)|list|length }}</h4>
+                <p class="text-muted mb-0">Active Templates</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h4 class="text-warning">{{ templates|selectattr('audio_file_path', '!=', '')|list|length }}</h4>
+                <p class="text-muted mb-0">With Audio</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h4 class="text-info">{{ templates|groupby('template_type')|list|length }}</h4>
+                <p class="text-muted mb-0">Template Types</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Voice Templates -->
+<div class="row">
+    {% for template_type in templates|groupby('template_type') %}
+    <div class="col-12 mb-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="fas fa-microphone me-2"></i>
+                    {{ template_type.grouper|title }} Templates
+                </h5>
+                <span class="badge bg-primary">{{ template_type.list|length }}/3 variations</span>
+            </div>
+            <div class="card-body">
+                {% for template in template_type.list %}
+                <div class="row align-items-center mb-3 p-3 border rounded">
+                    <div class="col-md-8">
+                        <div class="d-flex align-items-center mb-2">
+                            <span class="badge bg-secondary me-2">Variation {{ template.variation_number }}</span>
+                            {% if template.is_active %}
+                                <span class="status-indicator status-active"></span>
+                                <small class="text-success">Active</small>
+                            {% else %}
+                                <span class="status-indicator status-inactive"></span>
+                                <small class="text-muted">Inactive</small>
+                            {% endif %}
+                        </div>
+                        <p class="mb-2">{{ template.text_content }}</p>
+                        <small class="text-muted">
+                            <i class="fas fa-clock me-1"></i>
+                            Created: {{ template.created_at if template.created_at is string else template.created_at.strftime('%m/%d/%Y %H:%M') }}
+                        </small>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        {% if template.audio_file_path %}
+                        <button class="btn btn-outline-primary btn-sm mb-2" onclick="playAudio('{{ template.audio_file_path }}')">
+                            <i class="fas fa-play me-1"></i>
+                            Play Audio
+                        </button>
+                        {% else %}
+                        <span class="badge bg-warning mb-2">Audio Pending</span>
+                        {% endif %}
+                        <br>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-success" title="Set as Active">
+                                <i class="fas fa-check"></i>
+                            </button>
+                            <button class="btn btn-outline-info" title="Edit">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-outline-danger" title="Delete">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+                
+                {% if template_type.list|length < 3 %}
+                <div class="text-center py-3">
+                    <button class="btn btn-outline-primary" onclick="generateVariation('{{ template_type.grouper }}')">
+                        <i class="fas fa-plus me-2"></i>
+                        Generate Variation {{ template_type.list|length + 1 }}
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% if not templates %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body text-center py-5">
+                <i class="fas fa-microphone fa-3x text-muted mb-3"></i>
+                <h5 class="text-muted">No voice templates found</h5>
+                <p class="text-muted">Get started by generating your first voice template.</p>
+                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#generateTemplateModal">
+                    <i class="fas fa-plus me-2"></i>
+                    Generate First Template
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Generate Template Modal -->
+<div class="modal fade" id="generateTemplateModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-microphone me-2"></i>
+                    Generate Voice Template
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="generateTemplateForm" method="POST" action="{{ url_for('generate_voice_template') }}">
+                    <div class="mb-3">
+                        <label for="template_type" class="form-label">
+                            <i class="fas fa-tag me-2"></i>
+                            Template Type *
+                        </label>
+                        <select class="form-control" id="template_type" name="template_type" required>
+                            <option value="">Select Template Type</option>
+                            <option value="greeting">Greeting Message</option>
+                            <option value="department_routing">Department Routing</option>
+                            <option value="product_inquiry">Product Inquiry</option>
+                            <option value="hours_inquiry">Hours Inquiry</option>
+                            <option value="coupon_offer">Coupon Offer</option>
+                            <option value="hold_message">Hold Message</option>
+                            <option value="goodbye">Goodbye Message</option>
+                        </select>
+                        <div class="form-text">
+                            <i class="fas fa-info-circle me-1"></i>
+                            Choose the type of message this template will be used for
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="text_content" class="form-label">
+                            <i class="fas fa-align-left me-2"></i>
+                            Message Text *
+                        </label>
+                        <textarea class="form-control" id="text_content" name="text_content" rows="4" 
+                                  placeholder="Enter the text that will be converted to speech..." required></textarea>
+                        <div class="form-text">
+                            <i class="fas fa-info-circle me-1"></i>
+                            This text will be converted to speech using ElevenLabs AI voice generation
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Voice Generation:</strong> This will create a new voice variation using ElevenLabs. 
+                        Each template type can have up to 3 variations for natural conversation flow.
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" form="generateTemplateForm" class="btn btn-primary">
+                    <i class="fas fa-magic me-2"></i>
+                    Generate Voice Template
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Voice Settings -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-cog me-2"></i>
+                Voice Settings
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>ElevenLabs Integration</h6>
+                        <p class="text-muted">
+                            <i class="fas fa-check-circle text-success me-2"></i>
+                            Voice generation is powered by ElevenLabs AI
+                        </p>
+                        <p class="text-muted">
+                            <i class="fas fa-info-circle me-2"></i>
+                            Credits are used for each voice generation
+                        </p>
+                        <button class="btn btn-outline-primary btn-sm">
+                            <i class="fas fa-cog me-2"></i>
+                            Configure Voice Settings
+                        </button>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Template Management</h6>
+                        <ul class="list-unstyled">
+                            <li class="mb-2">
+                                <i class="fas fa-check-circle text-success me-2"></i>
+                                Maximum 3 variations per template type
+                            </li>
+                            <li class="mb-2">
+                                <i class="fas fa-check-circle text-success me-2"></i>
+                                Automatic rotation between variations
+                            </li>
+                            <li class="mb-2">
+                                <i class="fas fa-check-circle text-success me-2"></i>
+                                Voice consistency across all templates
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+$(document).ready(function() {
+    // Template type change handler
+    $('#template_type').on('change', function() {
+        let type = $(this).val();
+        let textarea = $('#text_content');
+        
+        // Pre-fill with example text based on type
+        switch(type) {
+            case 'greeting':
+                textarea.val('Thank you for calling our store. How can I help you today?');
+                break;
+            case 'department_routing':
+                textarea.val('I\'ll connect you with the appropriate department right away.');
+                break;
+            case 'product_inquiry':
+                textarea.val('Let me check our inventory for that item for you.');
+                break;
+            case 'hours_inquiry':
+                textarea.val('Our store hours are Monday through Friday, 8 AM to 9 PM, and weekends from 9 AM to 8 PM.');
+                break;
+            case 'coupon_offer':
+                textarea.val('I\'d be happy to share our current promotions and coupon offers with you.');
+                break;
+            case 'hold_message':
+                textarea.val('Please hold while I transfer your call. Thank you for your patience.');
+                break;
+            case 'goodbye':
+                textarea.val('Thank you for calling. Have a great day!');
+                break;
+            default:
+                textarea.val('');
+        }
+    });
+    
+    // Form validation
+    $('#generateTemplateForm').on('submit', function(e) {
+        let isValid = true;
+        
+        // Check required fields
+        $(this).find('[required]').each(function() {
+            if (!$(this).val().trim()) {
+                $(this).addClass('is-invalid');
+                isValid = false;
+            } else {
+                $(this).removeClass('is-invalid');
+            }
+        });
+        
+        if (!isValid) {
+            e.preventDefault();
+            alert('Please fill in all required fields.');
+        }
+    });
+    
+    // Remove validation styling on input
+    $('input, select, textarea').on('input change', function() {
+        $(this).removeClass('is-invalid');
+    });
+});
+
+// Generate variation for specific template type
+function generateVariation(templateType) {
+    $('#template_type').val(templateType);
+    $('#text_content').val('');
+    $('#generateTemplateModal').modal('show');
+}
+
+// Play audio function (placeholder)
+function playAudio(audioPath) {
+    // This would integrate with actual audio playback
+    alert('Audio playback would be implemented here for: ' + audioPath);
+}
+</script>
+{% endblock %}

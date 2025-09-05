@@ -1,0 +1,64 @@
+🚀 Starting Store Management Dashboard...
+
+🔧 Activating virtual environment...
+📥 Installing dashboard requirements...
+Requirement already satisfied: Flask==2.3.3 in ./.venv/lib/python3.13/site-packages (from -r requirements_dashboard.txt (line 1)) (2.3.3)
+Requirement already satisfied: Flask-SQLAlchemy==3.1.1 in ./.venv/lib/python3.13/site-packages (from -r requirements_dashboard.txt (line 2)) (3.1.1)
+Requirement already satisfied: Flask-Login==0.6.3 in ./.venv/lib/python3.13/site-packages (from -r requirements_dashboard.txt (line 3)) (0.6.3)
+Requirement already satisfied: Werkzeug==2.3.7 in ./.venv/lib/python3.13/site-packages (from -r requirements_dashboard.txt (line 4)) (2.3.7)
+Requirement already satisfied: SQLAlchemy==2.0.23 in ./.venv/lib/python3.13/site-packages (from -r requirements_dashboard.txt (line 5)) (2.0.23)
+Requirement already satisfied: Jinja2>=3.1.2 in ./.venv/lib/python3.13/site-packages (from Flask==2.3.3->-r requirements_dashboard.txt (line 1)) (3.1.6)
+Requirement already satisfied: itsdangerous>=2.1.2 in ./.venv/lib/python3.13/site-packages (from Flask==2.3.3->-r requirements_dashboard.txt (line 1)) (2.2.0)
+Requirement already satisfied: click>=8.1.3 in ./.venv/lib/python3.13/site-packages (from Flask==2.3.3->-r requirements_dashboard.txt (line 1)) (8.2.1)
+Requirement already satisfied: blinker>=1.6.2 in ./.venv/lib/python3.13/site-packages (from Flask==2.3.3->-r requirements_dashboard.txt (line 1)) (1.9.0)
+Requirement already satisfied: MarkupSafe>=2.1.1 in ./.venv/lib/python3.13/site-packages (from Werkzeug==2.3.7->-r requirements_dashboard.txt (line 4)) (3.0.2)
+Requirement already satisfied: typing-extensions>=4.2.0 in ./.venv/lib/python3.13/site-packages (from SQLAlchemy==2.0.23->-r requirements_dashboard.txt (line 5)) (4.14.1)
+🗄️  Initializing database...
+Traceback (most recent call last):
+  File "/Users/mikewilson/Desktop/ai-call-router/dashboard.py", line 2, in <module>
+    from flask_sqlalchemy import SQLAlchemy
+  File "/Users/mikewilson/Desktop/ai-call-router/.venv/lib/python3.13/site-packages/flask_sqlalchemy/__init__.py", line 5, in <module>
+    from .extension import SQLAlchemy
+  File "/Users/mikewilson/Desktop/ai-call-router/.venv/lib/python3.13/site-packages/flask_sqlalchemy/extension.py", line 9, in <module>
+    import sqlalchemy as sa
+  File "/Users/mikewilson/Desktop/ai-call-router/.venv/lib/python3.13/site-packages/sqlalchemy/__init__.py", line 13, in <module>
+    from .engine import AdaptedConnection as AdaptedConnection
+  File "/Users/mikewilson/Desktop/ai-call-router/.venv/lib/python3.13/site-packages/sqlalchemy/engine/__init__.py", line 18, in <module>
+    from . import events as events
+  File "/Users/mikewilson/Desktop/ai-call-router/.venv/lib/python3.13/site-packages/sqlalchemy/engine/events.py", line 19, in <module>
+    from .base import Connection
+  File "/Users/mikewilson/Desktop/ai-call-router/.venv/lib/python3.13/site-packages/sqlalchemy/engine/base.py", line 30, in <module>
+    from .interfaces import BindTyping
+  File "/Users/mikewilson/Desktop/ai-call-router/.venv/lib/python3.13/site-packages/sqlalchemy/engine/interfaces.py", line 38, in <module>
+    from ..sql.compiler import Compiled as Compiled
+  File "/Users/mikewilson/Desktop/ai-call-router/.venv/lib/python3.13/site-packages/sqlalchemy/sql/__init__.py", line 14, in <module>
+    from .compiler import COLLECT_CARTESIAN_PRODUCTS as COLLECT_CARTESIAN_PRODUCTS
+  File "/Users/mikewilson/Desktop/ai-call-router/.venv/lib/python3.13/site-packages/sqlalchemy/sql/compiler.py", line 61, in <module>
+    from . import crud
+  File "/Users/mikewilson/Desktop/ai-call-router/.venv/lib/python3.13/site-packages/sqlalchemy/sql/crud.py", line 34, in <module>
+    from . import dml
+  File "/Users/mikewilson/Desktop/ai-call-router/.venv/lib/python3.13/site-packages/sqlalchemy/sql/dml.py", line 34, in <module>
+    from . import util as sql_util
+  File "/Users/mikewilson/Desktop/ai-call-router/.venv/lib/python3.13/site-packages/sqlalchemy/sql/util.py", line 46, in <module>
+    from .ddl import sort_tables as sort_tables  # noqa: F401
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mikewilson/Desktop/ai-call-router/.venv/lib/python3.13/site-packages/sqlalchemy/sql/ddl.py", line 30, in <module>
+    from .elements import ClauseElement
+  File "/Users/mikewilson/Desktop/ai-call-router/.venv/lib/python3.13/site-packages/sqlalchemy/sql/elements.py", line 808, in <module>
+    class SQLCoreOperations(Generic[_T_co], ColumnOperators, TypingOnly):
+    ...<472 lines>...
+                ...
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/typing.py", line 1257, in _generic_init_subclass
+    super(Generic, cls).__init_subclass__(*args, **kwargs)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/Users/mikewilson/Desktop/ai-call-router/.venv/lib/python3.13/site-packages/sqlalchemy/util/langhelpers.py", line 1988, in __init_subclass__
+    raise AssertionError(
+    ...<2 lines>...
+    )
+AssertionError: Class <class 'sqlalchemy.sql.elements.SQLCoreOperations'> directly inherits TypingOnly but has additional attributes {'__static_attributes__', '__firstlineno__'}.
+
+✅ Dashboard started successfully!
+🌐 Access the dashboard at: http://localhost:5004
+🔑 Default login: admin / admin123
+
+Press Ctrl+C to stop the dashboard

@@ -1,0 +1,14 @@
+{
+  "ai_model": "gpt-4",
+  "voice_settings": {
+    "voice_id": "default",
+    "stability": 0.5,
+    "similarity_boost": 0.75
+  },
+  "system_preferences": {
+    "timeout_seconds": 30,
+    "max_retries": 3,
+    "enable_analytics": true
+  },
+  "updated_at": "2025-08-25T17:13:32.776709"
+}

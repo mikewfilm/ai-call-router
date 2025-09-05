@@ -1,0 +1,8 @@
+openai
+whisper
+sounddevice
+soundfile
+requests
+flask
+pytest
+pyyaml

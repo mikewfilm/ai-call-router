@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+
+{% block title %}Coupons - Store Management{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>
+                <i class="fas fa-ticket-alt me-2"></i>
+                Coupons
+            </h1>
+            <a href="{{ url_for('add_coupon') }}" class="btn btn-primary">
+                <i class="fas fa-plus me-2"></i>
+                Add Coupon
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Coupon Stats -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h4 class="text-primary">{{ coupons|length }}</h4>
+                <p class="text-muted mb-0">Total Coupons</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h4 class="text-success">{{ coupons|selectattr('is_active', '==', true)|list|length }}</h4>
+                <p class="text-muted mb-0">Active Coupons</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h4 class="text-warning">{{ coupons|selectattr('is_store_wide', '==', true)|list|length }}</h4>
+                <p class="text-muted mb-0">Store-wide</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h4 class="text-info">{{ coupons|selectattr('discount_type', '==', 'percentage')|list|length }}</h4>
+                <p class="text-muted mb-0">Percentage Off</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Coupons Table -->
+<div class="card">
+    <div class="card-header">
+        <i class="fas fa-list me-2"></i>
+        Coupons
+    </div>
+    <div class="card-body">
+        {% if coupons %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Code</th>
+                        <th>Description</th>
+                        <th>Discount</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>Expires</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for coupon in coupons %}
+                    <tr>
+                        <td>
+                            <strong>{{ coupon.code }}</strong>
+                            {% if coupon.is_store_wide %}
+                                <i class="fas fa-globe text-primary ms-1" title="Store-wide"></i>
+                            {% endif %}
+                        </td>
+                        <td>{{ coupon.description }}</td>
+                        <td>
+                            {% if coupon.discount_type == 'percentage' %}
+                                <span class="badge bg-success">{{ coupon.discount_value }}% OFF</span>
+                            {% else %}
+                                <span class="badge bg-info">${{ "%.2f"|format(coupon.discount_value) }} OFF</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if coupon.is_store_wide %}
+                                <span class="badge bg-primary">Store-wide</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Product-specific</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if coupon.is_active %}
+                                <span class="status-indicator status-active"></span>
+                                Active
+                            {% else %}
+                                <span class="status-indicator status-inactive"></span>
+                                Inactive
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if coupon.expires_at %}
+                                {% if coupon.expires_at is string %}
+                                    {% set date_str = coupon.expires_at.split('T')[0] if 'T' in coupon.expires_at else coupon.expires_at %}
+                                    <small class="text-muted">{{ date_str }}</small>
+                                    {% if date_str < now.strftime('%Y-%m-%d') %}
+                                        <i class="fas fa-clock text-danger ms-1" title="Expired"></i>
+                                    {% endif %}
+                                {% else %}
+                                    <small class="text-muted">{{ coupon.expires_at.strftime('%m/%d/%Y') }}</small>
+                                    {% if coupon.expires_at < now %}
+                                        <i class="fas fa-clock text-danger ms-1" title="Expired"></i>
+                                    {% endif %}
+                                {% endif %}
+                            {% else %}
+                                <small class="text-muted">No expiration</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="btn-group btn-group-sm" role="group">
+                                <button type="button" class="btn btn-outline-primary" title="Edit">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-success" title="Copy Code">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-info" title="View Details">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-warning" title="Toggle Status">
+                                    <i class="fas fa-toggle-on"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-5">
+            <i class="fas fa-ticket-alt fa-3x text-muted mb-3"></i>
+            <h5 class="text-muted">No coupons found</h5>
+            <p class="text-muted">Get started by creating your first coupon.</p>
+            <a href="{{ url_for('add_coupon') }}" class="btn btn-primary">
+                <i class="fas fa-plus me-2"></i>
+                Create First Coupon
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- SMS Body Editor -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex align-items-center">
+                <i class="fas fa-sms me-2"></i>
+                Coupon SMS Message
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('update_dialogue_template') }}">
+                    <input type="hidden" name="category" value="coupons" />
+                    <input type="hidden" name="key" value="sms_body" />
+                    <div class="mb-3">
+                        <label class="form-label">SMS text sent to callers who request coupons</label>
+                        <textarea name="text" rows="3" class="form-control" placeholder="Thanks! Here are today's coupons: …">{{ dialogue_templates.get('coupons', {}).get('sms_body', "Thanks! Here are today's coupons: …") if dialogue_templates else "Thanks! Here are today's coupons: …" }}</textarea>
+                        <div class="form-text">Keep it concise; plain text only. The voice app will use this exact text.</div>
+                    </div>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save me-2"></i>Save SMS Message</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+$(document).ready(function() {
+    // Copy coupon code functionality
+    $('.btn-outline-success').on('click', function() {
+        let code = $(this).closest('tr').find('td:first strong').text();
+        navigator.clipboard.writeText(code).then(function() {
+            // Show success message
+            $('<div class="alert alert-success alert-dismissible fade show" role="alert">')
+                .html('<i class="fas fa-check-circle me-2"></i>Coupon code copied to clipboard!')
+                .append('<button type="button" class="btn-close" data-bs-dismiss="alert"></button>')
+                .insertAfter('.row:first')
+                .delay(3000)
+                .fadeOut();
+        });
+    });
+    
+    // Toggle coupon status
+    $('.btn-outline-warning').on('click', function() {
+        let row = $(this).closest('tr');
+        let statusCell = row.find('td:eq(4)');
+        let isActive = statusCell.text().trim() === 'Active';
+        
+        if (isActive) {
+            statusCell.html('<span class="status-indicator status-inactive"></span>Inactive');
+        } else {
+            statusCell.html('<span class="status-indicator status-active"></span>Active');
+        }
+        
+        // Show status change message
+        $('<div class="alert alert-info alert-dismissible fade show" role="alert">')
+            .html('<i class="fas fa-info-circle me-2"></i>Coupon status updated!')
+            .append('<button type="button" class="btn-close" data-bs-dismiss="alert"></button>')
+            .insertAfter('.row:first')
+            .delay(3000)
+            .fadeOut();
+    });
+});
+</script>
+{% endblock %}

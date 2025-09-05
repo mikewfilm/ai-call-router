@@ -1,0 +1,90 @@
+[
+  {
+    "id": 1,
+    "name": "Grocery",
+    "phone_extension": "101",
+    "description": "Food items and groceries",
+    "is_active": true,
+    "created_at": "2025-08-25T17:13:32.776254"
+  },
+  {
+    "id": 2,
+    "name": "Meat & Seafood",
+    "phone_extension": "102",
+    "description": "Fresh meat and seafood",
+    "is_active": true,
+    "created_at": "2025-08-25T17:13:32.776256"
+  },
+  {
+    "id": 3,
+    "name": "Produce",
+    "phone_extension": "103",
+    "description": "Fresh fruits and vegetables",
+    "is_active": true,
+    "created_at": "2025-08-25T17:13:32.776257"
+  },
+  {
+    "id": 4,
+    "name": "Deli",
+    "phone_extension": "104",
+    "description": "Deli meats, cheeses, and prepared foods",
+    "is_active": true,
+    "created_at": "2025-08-25T17:13:32.776258"
+  },
+  {
+    "id": 5,
+    "name": "Bakery",
+    "phone_extension": "105",
+    "description": "Fresh baked goods and breads",
+    "is_active": true,
+    "created_at": "2025-08-25T17:13:32.776259"
+  },
+  {
+    "id": 6,
+    "name": "Pharmacy",
+    "phone_extension": "106",
+    "description": "Prescription medications and health products",
+    "is_active": true,
+    "created_at": "2025-08-25T17:13:32.776260"
+  },
+  {
+    "id": 7,
+    "name": "Pet Supplies",
+    "phone_extension": "107",
+    "description": "Pet food, toys, and supplies",
+    "is_active": true,
+    "created_at": "2025-08-25T17:13:32.776261"
+  },
+  {
+    "id": 8,
+    "name": "Customer Service",
+    "phone_extension": "108",
+    "description": "General customer service and inquiries",
+    "is_active": true,
+    "created_at": "2025-08-25T17:13:32.776262"
+  },
+  {
+    "name": "Test Department",
+    "phone_extension": "999",
+    "description": "A test department for integration testing",
+    "is_active": true,
+    "id": 9,
+    "created_at": "2025-08-25T17:18:15.192415"
+  },
+  {
+    "name": "Test Department",
+    "phone_extension": "999",
+    "description": "A test department for integration testing",
+    "is_active": true,
+    "id": 10,
+    "created_at": "2025-08-26T09:24:52.214770"
+  },
+  {
+    "name": "Toys & Games",
+    "phone_extension": "109",
+    "description": "Toys, games, puzzles, and entertainment items",
+    "is_active": true,
+    "id": 11,
+    "created_at": "2025-08-26T18:05:00.000000"
+  }
+]
