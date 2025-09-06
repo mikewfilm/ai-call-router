@@ -8,9 +8,27 @@ import requests
 import io
 
 import numpy as np
-import sounddevice as sd
 import soundfile as sf
 import webrtcvad
+
+import os
+
+USE_SOUNDDEVICE = os.getenv("USE_SOUNDDEVICE", "0") == "1"
+sd = None
+if USE_SOUNDDEVICE:
+    try:
+        import sounddevice as sd  # type: ignore
+    except Exception as e:
+        raise RuntimeError(
+            "sounddevice/PortAudio not available. Disable by unsetting USE_SOUNDDEVICE."
+        ) from e
+else:
+    class _SoundDeviceStub:
+        def __getattr__(self, name):
+            raise RuntimeError(
+                "sounddevice is disabled on this server. Set USE_SOUNDDEVICE=1 only for local runs."
+            )
+    sd = _SoundDeviceStub()
 
 from faster_whisper import WhisperModel
 from openai import OpenAI

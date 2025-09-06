@@ -3,7 +3,6 @@ gunicorn
 gevent
 openai
 whisper
-sounddevice
 soundfile
 requests
 pytest
