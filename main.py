@@ -9,11 +9,26 @@ import io
 
 import numpy as np
 import soundfile as sf
-import webrtcvad
 
 import os
 
 USE_SOUNDDEVICE = os.getenv("USE_SOUNDDEVICE", "0") == "1"
+USE_VAD = os.getenv("USE_VAD", "0") == "1"
+
+if USE_VAD:
+    try:
+        import webrtcvad  # type: ignore
+    except Exception as e:
+        raise RuntimeError(
+            "webrtcvad not available. Disable by unsetting USE_VAD."
+        ) from e
+else:
+    class _VADStub:
+        def __init__(self, *args, **kwargs): pass
+        def is_speech(self, *args, **kwargs):
+            # fallback: treat all audio as not speech
+            return False
+    webrtcvad = _VADStub  # type: ignore
 sd = None
 if USE_SOUNDDEVICE:
     try:
