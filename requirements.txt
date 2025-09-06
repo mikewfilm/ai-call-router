@@ -2,6 +2,7 @@
 numpy<2.0
 ctranslate2==4.5.0
 faster-whisper==1.0.3
++python-dotenv==1.0.1
 
 flask
 gunicorn
