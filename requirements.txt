@@ -1,11 +1,11 @@
+flask
+gunicorn
+gevent
 openai
 whisper
 sounddevice
 soundfile
 requests
-flask
 pytest
 pyyaml
-gunicorn==23.0.0
-gevent==24.2.1
-uvicorn==0.30.6
+uvicorn

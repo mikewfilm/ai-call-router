@@ -5,6 +5,7 @@ import time
 import random
 import collections
 import requests
+import io
 
 import numpy as np
 import sounddevice as sd
@@ -14,6 +15,9 @@ import webrtcvad
 from faster_whisper import WhisperModel
 from openai import OpenAI
 from dotenv import load_dotenv
+from twilio.twiml.voice_response import VoiceResponse
+from pydub import AudioSegment
+import pyaudio
 
 load_dotenv()
 
@@ -29,16 +33,11 @@ with open("store_config.json") as f:
 # Whisper model setup
 model = WhisperModel("tiny", device="cpu", compute_type="int8")
 
+# Flask app setup
+app = Flask(__name__)
 
 # Record user's voice with early cutoff if silence detected
-import webrtcvad
-import numpy as np
-import collections
-
 def record_audio(filename, sample_rate=16000, max_duration=6):
-    import webrtcvad
-    import collections
-
     print("Listening...")
 
     vad = webrtcvad.Vad()
@@ -81,7 +80,6 @@ def record_audio(filename, sample_rate=16000, max_duration=6):
 
 time.sleep(0.2)
 
-
 # Transcribe audio
 def transcribe(filename):
     segments, _ = model.transcribe(filename, beam_size=1)
@@ -109,7 +107,7 @@ Departments: {departments}
 Instructions:
 - You must **always** assign a department (never "None" unless it's clearly small talk or an incomplete request).
 - Make a **best guess** even if it's not 100% clear.
-- If the customer makes small talk (e.g., "how are you?", "what’s up?"), respond politely but do **not** assign a department yet. Wait for them to explain what they need.
+- If the customer makes small talk (e.g., "how are you?", "what's up?"), respond politely but do **not** assign a department yet. Wait for them to explain what they need.
 - If the customer is cut off or doesn't finish their sentence, respond with a short prompt asking them to clarify.
 - Use common sense and real-world retail logic to assign departments confidently, even if the item isn't explicitly listed.
 - Never say that you are an AI or mention artificial intelligence. Always respond as if you're a normal human employee working at the store, using casual, friendly language.
@@ -136,9 +134,9 @@ DEPARTMENT LOGIC:
 
 Instructions:
 - If a product fits multiple areas, pick the department most likely to handle **customer questions** about it.
-- Use common sense: “fish” usually means fresh fish unless the customer clearly says frozen or canned.
+- Use common sense: "fish" usually means fresh fish unless the customer clearly says frozen or canned.
 - Do NOT respond with "None" — if unsure, make your best guess using real-world logic.
-- If the customer’s request is vague or unrelated to a product, politely ask them to clarify.
+- If the customer's request is vague or unrelated to a product, politely ask them to clarify.
 
 
 
@@ -151,7 +149,7 @@ Example mappings:
 - Phone charger → Electronics
 - Dog food → Grocery
 - Toothpaste → Health and Beauty
-- Valentine’s card → Customer Service
+- Valentine's card → Customer Service
 - Printer → Electronics
 - Printer paper → Electronics
 - USB cable → Electronics
@@ -181,9 +179,6 @@ Example mappings:
 
 NEVER say anything outside the JSON block.
 """
-
-
-
 
     completion = client.chat.completions.create(
         model="gpt-4",
@@ -218,10 +213,6 @@ def speak_response(text):
     response = requests.post(url, headers=headers, json=data)
 
     if response.status_code == 200:
-        from pydub import AudioSegment
-        import io
-        import pyaudio
-
         # Decode MP3 using pydub
         audio = AudioSegment.from_file(io.BytesIO(response.content), format="mp3")
         pcm_data = audio.raw_data
@@ -256,8 +247,6 @@ def main():
     speak_response(greeting)
 
     while exchanges < MAX_EXCHANGES:
-
-        
         record_audio("input.wav", sample_rate=16000)
         user_text = transcribe("input.wav")
         print("You said:", user_text)
@@ -284,16 +273,9 @@ def main():
             exchanges += 1
 
     if exchanges >= MAX_EXCHANGES:
-        speak_response("Sorry, we’re having trouble understanding. Redirecting to a human.")
+        speak_response("Sorry, we're having trouble understanding. Redirecting to a human.")
 
-if __name__ == "__main__":
-
-# app.py (Flask webhook test)
-from flask import Flask, request, Response
-from twilio.twiml.voice_response import VoiceResponse
-
-app = Flask(__name__)
-
+# Flask routes
 @app.get("/")
 def health():
     return "OK", 200
@@ -305,18 +287,8 @@ def voice():
     vr.hangup()
     return Response(str(vr), mimetype="text/xml")
 
-if __name__ == "__main__":
-    app.run(port=5000, debug=True)
-
-
-
-from flask import Flask, request, Response
-from twilio.twiml.voice_response import VoiceResponse
-
-app = Flask(__name__)
-
-@app.route("/voice", methods=["POST"])
-def voice():
+@app.route("/voice_advanced", methods=["POST"])
+def voice_advanced():
     print("Incoming call...")
     speak_response("Welcome to Awesome Grocery. Please tell me what you're looking for.")
 
@@ -338,4 +310,3 @@ def voice():
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
-
