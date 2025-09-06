@@ -8,12 +8,28 @@ import requests
 import io
 
 import numpy as np
-import soundfile as sf
 
 import os
 
 USE_SOUNDDEVICE = os.getenv("USE_SOUNDDEVICE", "0") == "1"
 USE_VAD = os.getenv("USE_VAD", "0") == "1"
+USE_AUDIO = os.getenv("USE_AUDIO", "0") == "1"
+
+# Guard soundfile import
+if USE_AUDIO:
+    try:
+        import soundfile as sf
+    except Exception as e:
+        raise RuntimeError(
+            "soundfile not available. Disable by unsetting USE_AUDIO."
+        ) from e
+else:
+    class _SoundFileStub:
+        def __getattr__(self, name):
+            raise RuntimeError(
+                "soundfile is disabled on this server. Set USE_AUDIO=1 only for local runs."
+            )
+    sf = _SoundFileStub()
 
 if USE_VAD:
     try:
@@ -47,12 +63,38 @@ else:
 
 from faster_whisper import WhisperModel
 from openai import OpenAI
-from dotenv import load_dotenv
 from twilio.twiml.voice_response import VoiceResponse
-from pydub import AudioSegment
-import pyaudio
 
-load_dotenv()
+# Guard dotenv import
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    print("Warning: python-dotenv not available, skipping .env file loading")
+
+# Guard pyaudio import
+if USE_AUDIO:
+    try:
+        import pyaudio
+        from pydub import AudioSegment
+    except Exception as e:
+        raise RuntimeError(
+            "pyaudio/pydub not available. Disable by unsetting USE_AUDIO."
+        ) from e
+else:
+    class _PyAudioStub:
+        def __getattr__(self, name):
+            raise RuntimeError(
+                "pyaudio is disabled on this server. Set USE_AUDIO=1 only for local runs."
+            )
+    pyaudio = _PyAudioStub()
+    
+    class _AudioSegmentStub:
+        def __getattr__(self, name):
+            raise RuntimeError(
+                "pydub is disabled on this server. Set USE_AUDIO=1 only for local runs."
+            )
+    AudioSegment = _AudioSegmentStub()
 
 # API Keys
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
