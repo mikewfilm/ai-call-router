@@ -1,6 +1,7 @@
 from flask import Flask, request, Response
 import os
 import json
+import importlib
 from flask_sock import Sock
 import time
 import random
@@ -356,6 +357,47 @@ def main():
 @app.get("/")
 def health():
     return "OK", 200
+
+REQUIRED_ENV = [
+    "OPENAI_API_KEY",
+    "TWILIO_ACCOUNT_SID",
+    "TWILIO_AUTH_TOKEN",
+]
+
+@app.get("/startup_check")
+def startup_check():
+    checks = {}
+
+    # env presence (masked)
+    for k in REQUIRED_ENV:
+        checks[f"env:{k}"] = "present" if os.getenv(k) else "MISSING"
+
+    # import checks
+    def has(mod):
+        try:
+            importlib.import_module(mod)
+            return "ok"
+        except Exception as e:
+            return f"error: {e.__class__.__name__}"
+
+    checks["import:twilio"] = has("twilio")
+    checks["import:flask_sock"] = has("flask_sock")
+    checks["import:gevent"] = has("gevent")
+
+    # basic app routes present?
+    try:
+        rules = list(app.url_map.iter_rules())
+    except Exception:
+        rules = []
+    paths = {r.rule for r in rules}
+    checks["route:/"] = "ok" if "/" in paths else "missing"
+    checks["route:/voice_advanced"] = "ok" if "/voice_advanced" in paths else "missing"
+    checks["route:/voice_stream(ws)"] = "ok" if any("/voice_stream" in str(r) for r in rules) else "missing"
+
+    # info
+    checks["procfile_worker"] = "gevent"
+    from flask import jsonify
+    return jsonify(status="ok", checks=checks)
 
 @app.post("/voice")
 def voice():

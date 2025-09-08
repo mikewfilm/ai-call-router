@@ -1,1 +1,1 @@
-web: gunicorn -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1 -b 0.0.0.0:$PORT main:app
+web: gunicorn -k gevent -w 1 -b 0.0.0.0:$PORT wsgi:app --log-level debug --capture-output --enable-stdio-inheritance --error-logfile - --access-logfile -
