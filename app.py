@@ -15,7 +15,6 @@ from flask import Flask, request, Response, url_for, has_request_context, render
 import requests
 from collections import defaultdict
 import base64
-import whisper
 import queue
 import subprocess
 import tempfile
@@ -28,6 +27,23 @@ import sys
 import traceback
 import asyncio
 import aiohttp
+
+# Optional Whisper imports - only load if explicitly enabled
+logger = logging.getLogger(__name__)
+USE_LOCAL_WHISPER = os.getenv("USE_LOCAL_WHISPER", "0") == "1"
+FasterWhisper = None
+WhisperLegacy = None
+if USE_LOCAL_WHISPER:
+    try:
+        from faster_whisper import WhisperModel as FasterWhisper  # preferred
+    except Exception as e:
+        logger.warning("faster-whisper unavailable: %s", e)
+    try:
+        import whisper as WhisperLegacy  # fallback legacy whisper
+    except Exception as e:
+        logger.warning("openai-whisper unavailable: %s", e)
+else:
+    logger.info("Local Whisper disabled (USE_LOCAL_WHISPER=0); prod will use Twilio Gather.")
 from bs4 import BeautifulSoup
 import wikipedia
 from googlesearch import search
@@ -396,7 +412,6 @@ except ImportError:
     SHARED_DATA_AVAILABLE = False
     print("[WARNING] shared_data_manager.py not found - using default data")
 from openai import OpenAI
-from faster_whisper import WhisperModel
 
 # Import comprehensive grocery department routing
 try:
@@ -1024,8 +1039,23 @@ def clean_item_label(s: str) -> str:
 # Use a multilingual model by default so language detection actually works.
 # You can override via WHISPER_MODEL env (e.g., "medium" or "large-v3").
 WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "small")
-# IMPORTANT: language=None enables auto language detection
-whisper_model = WhisperModel(WHISPER_MODEL_NAME, device="cpu", compute_type="int8")
+
+def _get_whisper_impl():
+    if not USE_LOCAL_WHISPER:
+        return None
+    if FasterWhisper is not None:
+        def transcribe_faster(path):
+            model = FasterWhisper(WHISPER_MODEL_NAME, device="cpu", compute_type="int8")
+            segments, info = model.transcribe(path, beam_size=2, vad_filter=True, language=None)
+            return " ".join(s.text for s in segments if getattr(s, "text", None)), getattr(info, "language", "en"), getattr(info, "language_probability", 0.0)
+        return transcribe_faster
+    if WhisperLegacy is not None:
+        def transcribe_legacy(path):
+            model = WhisperLegacy.load_model(WHISPER_MODEL_NAME)
+            res = model.transcribe(path)
+            return (res.get("text") or "").strip(), "en", 1.0
+        return transcribe_legacy
+    return None
 
 app = Flask(__name__, static_folder="static")
 
@@ -1323,22 +1353,14 @@ def prewarm_tts_files():
 
 # ======= ASR / language ID =======
 def transcribe_file(local_wav_path: str) -> tuple[str,str,float]:
-    # language=None allows detection; returns info.language and language_probability
-    segments, info = whisper_model.transcribe(
-        local_wav_path,
-        beam_size=2,
-        vad_filter=True,
-        language=None,
-        initial_prompt=(
-            "Retail phone inquiry. Common brands and store items: Nike, Adidas, New Balance, Levi's, "
-            "iPhone, AirPods, PlayStation, Xbox, markers, highlighters, printer paper, shampoo, "
-            "deodorant, maxi pads, tampons, diapers, vitamins, fish, salmon, chicken thighs."
-        ),
-    )
-    text = " ".join(seg.text for seg in segments).strip()
-    lang = (getattr(info, "language", "en") or "en").lower()
-    prob = float(getattr(info, "language_probability", 0.0) or 0.0)
-    return text, lang, prob
+    transcribe = _get_whisper_impl()
+    if not transcribe:
+        logger.warning("Local Whisper disabled or not installed; skipping local transcription.")
+        # Return empty result to trigger fallback
+        return "", "en", 0.0
+    
+    # Use the available Whisper implementation
+    return transcribe(local_wav_path)
 
 BRAND_FALLBACKS = {
     "nike": "nike shoes",
@@ -3075,6 +3097,21 @@ def quick_lang_guess(text: str, default: str="en") -> str:
 def prepare_reply(job_id: str, local_wav_path: str, base_url: str):
     try:
         raw, lang_detected, lang_prob = transcribe_file(local_wav_path)
+        
+        # If Whisper is not available, fall back to Twilio Gather
+        if not raw and not USE_LOCAL_WHISPER:
+            logger.warning("Local Whisper not available; falling back to Twilio Gather for job %s", job_id)
+            response_url = tts_line_url("Sorry, I couldn't process that recording. Please say what you need.", None, base_url, job_id, "Fallback")
+            JOBS[job_id].update({
+                "ready": True,
+                "needs_confirm": False,
+                "response_url": response_url,
+                "phase": "followup_ready",
+                "department": None,
+                "waiting_for_followup": True,
+                "fallback_to_gather": True
+            })
+            return
         # decide language
         caller_lang = lang_detected if lang_prob >= 0.70 else "en"
         repaired = repair_transcript(raw)
@@ -4901,6 +4938,26 @@ def confirm():
             download_twilio_recording(recording_url, local_wav)
             reply, _, _ = transcribe_file(local_wav)
             print(f"[CONFIRM HEARD via Record] '{reply}'")
+            
+            # If Whisper is not available and no transcription, fall back to Gather
+            if not reply and not USE_LOCAL_WHISPER:
+                logger.warning("Local Whisper not available for confirm; falling back to Gather")
+                vr = VoiceResponse()
+                g = Gather(
+                    input="speech",
+                    action=f"{get_base_url()}/confirm?job={job_id}",
+                    method="POST",
+                    language="es-US" if caller_lang.startswith("es") else "en-US",
+                    timeout=max(1, CONF_TIMEOUT),
+                    speech_timeout="auto",
+                    profanity_filter=True,
+                    barge_in=True
+                )
+                prompt_line = msg("yes_no", caller_lang)
+                g.play(tts_line_url(prompt_line, "tts_cache/yes_or_no.mp3" if caller_lang=="en" else f"{CACHE_SUBDIR}/yes_no_{caller_lang}.mp3", get_base_url()))
+                vr.append(g)
+                print(f"[CONFIRM] TwiML(whisper fallback)->\n{str(vr)}")
+                return xml_response(vr)
 
         # Operator request during confirm?
         if wants_operator(reply):
@@ -6390,6 +6447,23 @@ def api_update_cache():
 if __name__ == "__main__":
     PORT = int(os.getenv("PORT", "5003"))
     prewarm_tts_files()
-    print(f"Starting Flask on 0.0.0.0:{PORT} (Whisper={WHISPER_MODEL_NAME})")
+    
+    # Log ASR configuration
+    if USE_GATHER_MAIN:
+        print(f"[ASR] Primary: Twilio Gather ASR (USE_GATHER_MAIN=True)")
+    else:
+        print(f"[ASR] Primary: Local recording fallback (USE_GATHER_MAIN=False)")
+    
+    if USE_LOCAL_WHISPER:
+        if FasterWhisper is not None:
+            print(f"[ASR] Local Whisper: faster-whisper available (model={WHISPER_MODEL_NAME})")
+        elif WhisperLegacy is not None:
+            print(f"[ASR] Local Whisper: openai-whisper available (model={WHISPER_MODEL_NAME})")
+        else:
+            print(f"[ASR] Local Whisper: ENABLED but no implementation available")
+    else:
+        print(f"[ASR] Local Whisper: DISABLED (USE_LOCAL_WHISPER=0)")
+    
+    print(f"Starting Flask on 0.0.0.0:{PORT}")
     log_effective_config()
     app.run(host="0.0.0.0", port=PORT, debug=False)
