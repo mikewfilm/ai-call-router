@@ -22,6 +22,5 @@ gevent-websocket
 # --- development/testing ---
 pytest
 pyyaml
-uvicorngevent-websocket
 flask-sock
 simple-websocket
