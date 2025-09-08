@@ -14,6 +14,11 @@ faster-whisper==1.0.3
 requests
 twilio
 
+# --- WebSocket dependencies ---
+flask-sock
+simple-websocket
+gevent-websocket
+
 # --- development/testing ---
 pytest
 pyyaml

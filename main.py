@@ -1,6 +1,7 @@
 from flask import Flask, request, Response
 import os
 import json
+from flask_sock import Sock
 import time
 import random
 import collections
@@ -63,7 +64,7 @@ else:
 
 from faster_whisper import WhisperModel
 from openai import OpenAI
-from twilio.twiml.voice_response import VoiceResponse
+from twilio.twiml.voice_response import VoiceResponse, Start, Stream
 
 # Guard dotenv import
 try:
@@ -110,6 +111,7 @@ model = WhisperModel("tiny", device="cpu", compute_type="int8")
 
 # Flask app setup
 app = Flask(__name__)
+sock = Sock(app)
 
 # Record user's voice with early cutoff if silence detected
 def record_audio(filename, sample_rate=16000, max_duration=6):
@@ -379,9 +381,51 @@ def voice_advanced():
 
     # Return TwiML to Twilio — we can hang up here or keep the call alive
     resp = VoiceResponse()
+    
+    # Build WSS URL on this host
+    wss_url = f"wss://{request.host}/voice_stream"
+    start = Start()
+    start.stream(url=wss_url, track="inbound")  # use "both" if you want caller+agent audio
+    resp.append(start)
+    
     resp.say(response_text, voice="alice")
     resp.hangup()
     return Response(str(resp), mimetype='text/xml')
+
+@sock.route('/voice_stream')
+def voice_stream(ws):
+    """
+    Twilio Media Streams WebSocket endpoint.
+    Receives JSON messages: 'start', many 'media', then 'stop'.
+    """
+    print("WS: client connected", flush=True)
+    try:
+        while True:
+            msg = ws.receive()
+            if msg is None:
+                break
+            data = json.loads(msg)
+            event = data.get("event")
+
+            if event == "start":
+                stream_sid = data["start"]["streamSid"]
+                call_sid = data["start"].get("callSid")
+                print(f"WS start: streamSid={stream_sid} callSid={call_sid}", flush=True)
+
+            elif event == "media":
+                # payload is base64-encoded audio frame (20ms)
+                # timestamp = data["media"]["timestamp"]
+                # TODO: send to ASR / realtime pipeline
+                pass
+
+            elif event == "stop":
+                print("WS stop", flush=True)
+                break
+
+    except Exception as e:
+        print(f"WS error: {e}", flush=True)
+    finally:
+        print("WS: client disconnected", flush=True)
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
