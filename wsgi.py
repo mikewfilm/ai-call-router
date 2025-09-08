@@ -2,7 +2,8 @@ import logging, traceback
 logging.basicConfig(level=logging.INFO)
 
 try:
-    from main import app  # import the real Flask app from main.py
+    from main import app as application  # import the real Flask app from main.py
+    app = application
 except Exception:
     logging.exception("❌ App failed to import at startup")
     # Fallback minimal app to ensure Gunicorn binds the port and logs the traceback
@@ -15,3 +16,8 @@ except Exception:
             "Import failed. Check logs for traceback (look for 'App failed to import at startup').",
             status=500,
         )
+
+# Add /healthz route for Railway health checks
+@app.get("/healthz")
+def healthz():
+    return "OK"
