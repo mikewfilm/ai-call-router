@@ -22,4 +22,6 @@ gevent-websocket
 # --- development/testing ---
 pytest
 pyyaml
-uvicorn
+uvicorngevent-websocket
+flask-sock
+simple-websocket
