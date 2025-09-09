@@ -24,3 +24,5 @@ pytest
 pyyaml
 flask-sock
 simple-websocket
+
+beautifulsoup4
