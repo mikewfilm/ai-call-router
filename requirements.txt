@@ -30,3 +30,7 @@ beautifulsoup4
 wikipedia
 
 googlesearch-python
+
+flask-sqlalchemy
+flask-login
+werkzeug
