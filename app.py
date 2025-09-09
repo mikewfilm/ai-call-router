@@ -11,7 +11,7 @@ import traceback
 import re
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from flask import Flask, request, Response, url_for, has_request_context, render_template, jsonify, redirect
+from flask import Flask, request, Response, url_for, has_request_context, render_template, jsonify, redirect, current_app
 import requests
 from collections import defaultdict
 import base64
@@ -724,6 +724,7 @@ GATHER_HINTS = os.getenv(
 # Use Twilio's enhanced speech model
 GATHER_ENHANCED = os.getenv("GATHER_ENHANCED", "1") in ("1", "true", "True")
 GATHER_MAX_ATTEMPTS = int(os.getenv("GATHER_MAX_ATTEMPTS", "3"))
+GATHER_MAX_SECONDS = int(os.getenv("GATHER_MAX_SECONDS", "45"))  # total silence budget
 
 # Twilio diagnostics
 DIAG_TWILIO = int(os.getenv("DIAG_TWILIO", "1"))  # default ON until we're done
@@ -5226,8 +5227,9 @@ def confirm():
                 twiml_play_tts(vr, msg("reask_cap", caller_lang), "tts_cache/reask_cap.mp3" if caller_lang=="en" else f"{CACHE_SUBDIR}/reask_cap_{caller_lang}.mp3")
                 # NEW: use Gather for fresh item if enabled
                 if USE_GATHER_MAIN:
+                    call_id = job_id  # Use job_id as call_id for consistency
                     g = Gather(**gather_kwargs({
-                        "action": abs_url(url_for("handle_gather")),
+                        "action": abs_url(url_for("handle_gather", call_id=call_id, t0=int(time.time()))),
                         "method": "POST",
                         "language": _primary_lang_code(caller_lang),
                         "timeout": CONF_TIMEOUT,
@@ -5375,7 +5377,7 @@ def voice_post():
     if USE_GATHER_MAIN:
         # Correct route + correct locale code for Twilio
         g = Gather(**gather_kwargs({
-            "action": abs_url(url_for("handle_gather", call_id=call_id)),
+            "action": abs_url(url_for("handle_gather", call_id=call_id, t0=int(time.time()))),
             "method": "POST",
             "language": _primary_lang_code(DEFAULT_LANG),
             "timeout": max(4, CONF_TIMEOUT),
@@ -5397,29 +5399,59 @@ def handle_gather():
     """First utterance via Twilio Gather (speech). Fast and noise-safe."""
     _log_twilio_request("HANDLE_GATHER")
     try:
-        # Read parameters
-        n = int(request.args.get("n", "1"))
+        # Read parameters with silence tracking
+        t0 = int(request.args.get("t0", "0") or "0")
+        now = int(time.time())
+        elapsed = now - t0 if t0 else 0
+        n = int(request.args.get("n", "1") or "1")
         sr = (request.form.get("SpeechResult") or "").strip()
         
         if not sr:
-            if n < GATHER_MAX_ATTEMPTS:
-                # reprompt
+            # Log empty SpeechResult case
+            current_app.logger.info("[ASR-GATHER] empty SpeechResult; n=%s elapsed=%ss (max=%s)", 
+                                   n, elapsed, GATHER_MAX_SECONDS)
+            
+            if elapsed >= GATHER_MAX_SECONDS:
+                # Total silence budget exceeded - polite hangup
                 vr = VoiceResponse()
-                call_id = request.args.get("call_id") or request.form.get("call_id") or str(uuid.uuid4())
-                g = Gather(**gather_kwargs({"action": abs_url(url_for("handle_gather", call_id=call_id, n=n+1)),
-                                           "method": "POST",
-                                           "bargeIn": True,
-                                           "profanityFilter": True}))
-                # pick reprompt audio
-                reprompt = static_file_url("tts_cache/reprompt_listening.mp3")
-                if not os.path.exists(os.path.join(app.static_folder, "tts_cache/reprompt_listening.mp3")):
-                    reprompt = static_file_url("tts_cache/no_recording.mp3")
-                g.play(reprompt)
-                vr.append(g)
+                vr.play(static_file_url("tts_cache/no_recording.mp3"))
+                vr.hangup()
                 return xml_response(vr)
             else:
-                # exhausted attempts → existing behavior
-                return handle_recording()
+                # Continue gathering with increased timeout
+                next_n = n + 1
+                next_timeout = max(GATHER_TIMEOUT, 7)  # give ASR more time
+                
+                current_app.logger.info("[ASR-GATHER] empty SpeechResult; n=%s elapsed=%ss (max=%s), next_timeout=%s",
+                                       n, elapsed, GATHER_MAX_SECONDS, next_timeout)
+                
+                vr = VoiceResponse()
+                call_id = request.args.get("call_id") or request.form.get("call_id") or str(uuid.uuid4())
+                
+                g = Gather(**gather_kwargs({
+                    "action": abs_url(url_for("handle_gather", call_id=call_id, n=next_n, t0=t0)),
+                    "method": "POST",
+                    "timeout": next_timeout,
+                    "bargeIn": True,
+                    "profanityFilter": True
+                }))
+                
+                if n >= GATHER_MAX_ATTEMPTS:
+                    # Exhausted attempts - use silent Gather with brief pause
+                    vr.pause(length=1)
+                    # Optionally add very short earcon
+                    earcon = static_file_url("tts_cache/reprompt_listening.mp3")
+                    if os.path.exists(os.path.join(app.static_folder, "tts_cache/reprompt_listening.mp3")):
+                        g.play(earcon)
+                else:
+                    # Normal reprompt with audio
+                    reprompt = static_file_url("tts_cache/reprompt_listening.mp3")
+                    if not os.path.exists(os.path.join(app.static_folder, "tts_cache/reprompt_listening.mp3")):
+                        reprompt = static_file_url("tts_cache/no_recording.mp3")
+                    g.play(reprompt)
+                
+                vr.append(g)
+                return xml_response(vr)
         
         speech = sr
 
