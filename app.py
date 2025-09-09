@@ -11,7 +11,7 @@ import traceback
 import re
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from flask import Flask, request, Response, url_for, has_request_context, render_template, jsonify, redirect, current_app
+from flask import Flask, request, Response, url_for, has_request_context, render_template, jsonify, redirect, current_app, make_response
 import requests
 from collections import defaultdict
 import base64
@@ -715,7 +715,7 @@ GATHER_LANGUAGE = os.getenv("GATHER_LANGUAGE", "en-US")
 # Overall silence timeout (seconds) before Gather ends; for speech we also set speechTimeout.
 GATHER_TIMEOUT = int(os.getenv("GATHER_TIMEOUT", "5"))
 # "auto" lets Twilio decide when the caller stopped speaking; you can set a number (e.g., "3") too.
-GATHER_SPEECH_TIMEOUT = os.getenv("GATHER_SPEECH_TIMEOUT", "auto")
+GATHER_SPEECH_TIMEOUT = str(max(GATHER_TIMEOUT, 7))  # numeric string, NOT "auto"
 # Comma-separated phrases to bias recognition toward store vocabulary.
 GATHER_HINTS = os.getenv(
     "GATHER_HINTS",
@@ -733,14 +733,17 @@ DIAG_LOG_BODY_LIMIT = int(os.getenv("DIAG_LOG_BODY_LIMIT", "4096"))
 def gather_kwargs(overrides: dict | None = None) -> dict:
     """Build consistent kwargs for Twilio <Gather> speech recognition."""
     base = {
-        "input": "speech",              # speech-only; add " dtmf" if you want dual input
+        "input": "speech",
         "language": GATHER_LANGUAGE,
+        "method": "POST",
         "enhanced": GATHER_ENHANCED,
-        "timeout": GATHER_TIMEOUT,      # dtmf timeout; harmless to include
-        "speechTimeout": GATHER_SPEECH_TIMEOUT,
+        "actionOnEmptyResult": True,
+        "profanityFilter": True,
+        "bargeIn": True,
+        "timeout": GATHER_TIMEOUT,            # numeric (int)
+        "speechTimeout": str(max(GATHER_TIMEOUT, 7)),  # numeric string, NOT "auto"
+        "speechModel": "phone_call",          # critical for 13335
         "hints": GATHER_HINTS,
-        "actionOnEmptyResult": True,    # Twilio should POST to action even on empty result
-        # keep existing action/method from call sites
     }
     if overrides:
         base.update({k: v for k, v in overrides.items() if v is not None})
@@ -1100,6 +1103,23 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 app.config.setdefault("PREFERRED_URL_SCHEME", "https")
 
+# Global error handlers for Twilio webhooks (fix 12300)
+@app.errorhandler(404)
+def err_404(_):
+    vr = VoiceResponse()
+    vr.play("https://call-router-audio-2526.twil.io/holdy_tiny.mp3")
+    # loop back to /result to keep Twilio alive; no job means graceful retry
+    vr.redirect(url_for("result", job="fallback", n=1, t=int(time.time())), method="POST")
+    return xml_response(vr)
+
+@app.errorhandler(500)
+def err_500(_):
+    vr = VoiceResponse()
+    vr.play("https://call-router-audio-2526.twil.io/holdy_tiny.mp3")
+    vr.say("Still working on it.")
+    vr.redirect(url_for("handle"), method="POST")
+    return xml_response(vr)
+
 @app.after_request
 def _force_twiml_xml(resp):
     try:
@@ -1173,6 +1193,64 @@ def _log_twilio_request(label: str):
     except Exception as e:
         current_app.logger.exception("Failed to log Twilio request: %s", e)
 
+# Redis-backed job state helpers (fix 11200)
+import json
+from typing import Optional
+_redis = None
+_fallback_state = {}  # process-local last resort
+
+def get_redis():
+    global _redis
+    if _redis is not None:
+        return _redis
+    url = os.getenv("REDIS_URL")
+    if not url:
+        _redis = None
+        return None
+    from redis import Redis
+    _redis = Redis.from_url(url, decode_responses=True)
+    return _redis
+
+def save_state(job_id: str, data: dict, ttl_sec: int = 900):
+    r = get_redis()
+    payload = json.dumps(data)
+    if r:
+        r.setex(f"job:{job_id}", ttl_sec, payload)
+    else:
+        _fallback_state[f"job:{job_id}"] = (time.time()+ttl_sec, payload)
+
+def load_state(job_id: str) -> Optional[dict]:
+    r = get_redis()
+    key = f"job:{job_id}"
+    if r:
+        v = r.get(key)
+        return json.loads(v) if v else None
+    # fallback
+    tup = _fallback_state.get(key)
+    if not tup:
+        return None
+    exp, payload = tup
+    if exp < time.time():
+        _fallback_state.pop(key, None)
+        return None
+    return json.loads(payload)
+
+def clear_state(job_id: str):
+    """Clear job state from Redis or fallback storage"""
+    r = get_redis()
+    key = f"job:{job_id}"
+    if r:
+        r.delete(key)
+    else:
+        _fallback_state.pop(key, None)
+
+def update_state(job_id: str, updates: dict):
+    """Update job state with new values"""
+    state = load_state(job_id) or {}
+    state.update(updates)
+    save_state(job_id, state)
+    return state
+
 def static_file_url(relpath: str) -> str:
     base = get_base_url()
     rel = (relpath or "").lstrip("/")
@@ -1181,7 +1259,10 @@ def static_file_url(relpath: str) -> str:
     return f"{base}/static/{rel}"
 
 def xml_response(vr: VoiceResponse) -> Response:
-	return Response(str(vr), mimetype="text/xml")
+    xml = str(vr)
+    resp = make_response(xml, 200)
+    resp.headers["Content-Type"] = "text/xml; charset=utf-8"
+    return resp
 
 CACHE_SUBDIR = "tts_cache"
 
@@ -3198,7 +3279,7 @@ def prepare_reply(job_id: str, local_wav_path: str, base_url: str):
         if not raw and not USE_LOCAL_WHISPER:
             logger.warning("Local Whisper not available; falling back to Twilio Gather for job %s", job_id)
             response_url = tts_line_url("Sorry, I couldn't process that recording. Please say what you need.", None, base_url, job_id, "Fallback")
-            JOBS[job_id].update({
+            update_state(job_id, {
                 "ready": True,
                 "needs_confirm": False,
                 "response_url": response_url,
@@ -3226,7 +3307,7 @@ def prepare_reply(job_id: str, local_wav_path: str, base_url: str):
         if intent and info_line:
             out_name = f"{CACHE_SUBDIR}/info_{intent}_{job_id}.mp3"
             response_url = tts_line_url(info_line, out_name, base_url, job_id, "Store Info")
-            JOBS[job_id].update({
+            update_state(job_id, {
                 "ready": True,
                 "needs_confirm": False,
                 "response_url": response_url,
@@ -3244,7 +3325,7 @@ def prepare_reply(job_id: str, local_wav_path: str, base_url: str):
                 spoken = msg("connecting_operator", caller_lang)
                 out_name = f"{CACHE_SUBDIR}/op_{job_id}.mp3"
                 response_url = tts_line_url(spoken, out_name, base_url)
-                JOBS[job_id].update({
+                update_state(job_id, {
                     "ready": True,
                     "phase": "operator_ready",
                     "needs_confirm": False,
@@ -3264,7 +3345,7 @@ def prepare_reply(job_id: str, local_wav_path: str, base_url: str):
                 line = speak_aisle_answer(item_q, locs, caller_lang)
                 out_name = f"{CACHE_SUBDIR}/aisle_{job_id}.mp3"
                 response_url = tts_line_url(line, out_name, base_url)
-                JOBS[job_id].update({
+                update_state(job_id, {
                     "ready": True,
                     "needs_confirm": False,
                     "response_url": response_url,
@@ -3283,7 +3364,7 @@ def prepare_reply(job_id: str, local_wav_path: str, base_url: str):
                 # Fallback to cached yes/no prompt only
                 confirm_url = tts_line_url(msg("yes_no", caller_lang), None, base_url, job_id, "ConfirmFallback")
             time.sleep(0.25)
-            JOBS[job_id].update({
+            update_state(job_id, {
                 "ready": True,
                 "needs_confirm": True,
                 "confirm_url": confirm_url,
@@ -3305,7 +3386,7 @@ def prepare_reply(job_id: str, local_wav_path: str, base_url: str):
             msg("reask_cap", "en") if caller_lang=="en" else msg("reask_cap", caller_lang),
         ])
         response_url = tts_line_url(spoken, None, base_url, job_id, "Clarify")
-        JOBS[job_id].update({
+        update_state(job_id, {
             "ready": True,
             "needs_confirm": False,
             "needs_clarify": True,
@@ -3320,7 +3401,7 @@ def prepare_reply(job_id: str, local_wav_path: str, base_url: str):
         print(f"[JOB {job_id}] clarify -> {response_url} (heard='{raw}') lang={caller_lang} suspect_es={suspect_es}")
     except Exception as e:
         response_url = tts_line_url(msg("err_global","en"), None, base_url, job_id, "Error")
-        JOBS[job_id].update({
+        update_state(job_id, {
             "ready": True, "needs_confirm": False,
             "response_url": response_url, "needs_clarify": False, "phase": "error"
         })
@@ -3334,7 +3415,7 @@ def prepare_reply_from_recording(job_id: str, recording_url: str, base_url: str)
         prepare_reply(job_id, local_wav, base_url)
     except Exception as e:
         response_url = tts_line_url(msg("err_global","en"), None, base_url, job_id, "Error")
-        JOBS[job_id].update({
+        update_state(job_id, {
             "ready": True, "needs_confirm": False,
             "response_url": response_url, "needs_clarify": False, "phase": "error"
         })
@@ -3610,7 +3691,7 @@ def prepare_reply_from_text(job_id: str, raw_text: str, base_url: str):
             response_url = tts_line_url(line, None, base_url, job_id, "DeptSkip")
             if not response_url or response_url == "None":
                 response_url = tts_line_url("I'll connect you to an associate who can help with that.", None, base_url, job_id, "DeptSkipFallback")
-            JOBS[job_id].update({
+            update_state(job_id, {
                 "ready": True,
                 "needs_confirm": False,
                 "response_url": response_url,
@@ -3625,7 +3706,7 @@ def prepare_reply_from_text(job_id: str, raw_text: str, base_url: str):
             # Speak the coupons intro and enter coupon follow-up gather
             spoken, dept = generate_response("coupons", caller_lang)
             response_url = tts_line_url(spoken, None, base_url, job_id, "Coupon Intro")
-            JOBS[job_id].update({
+            update_state(job_id, {
                 "ready": True,
                 "needs_confirm": False,
                 "response_url": response_url,
@@ -3654,7 +3735,7 @@ def prepare_reply_from_text(job_id: str, raw_text: str, base_url: str):
                 response_url = tts_line_url(line, None, base_url, job_id, "PharmacyGreeting")
                 if not response_url or response_url == "None":
                     response_url = tts_line_url("Thanks for calling the pharmacy. I can help with prescription refills, medical supply inventory, etc. How can I help?", None, base_url, job_id, "PharmacyGreetingFallback")
-                JOBS[job_id].update({
+                update_state(job_id, {
                     "ready": True,
                     "needs_confirm": False,
                     "response_url": response_url,
@@ -3679,7 +3760,7 @@ def prepare_reply_from_text(job_id: str, raw_text: str, base_url: str):
             response_url = tts_line_url(line, None, base_url, job_id, "DeptSkip")
             if not response_url or response_url == "None":
                 response_url = tts_line_url("I'll connect you to an associate who can help with that.", None, base_url, job_id, "DeptSkipFallback")
-            JOBS[job_id].update({
+            update_state(job_id, {
                 "ready": True,
                 "needs_confirm": False,
                 "response_url": response_url,
@@ -3701,7 +3782,7 @@ def prepare_reply_from_text(job_id: str, raw_text: str, base_url: str):
             if not response_url or response_url == "None":
                 # Fallback to prewarmed phrase to avoid pending state
                 response_url = tts_line_url("Our store hours are 7 AM to 10 PM, seven days a week.", None, base_url, job_id, "StoreInfoFallback")
-            JOBS[job_id].update({
+            update_state(job_id, {
                 "ready": True,
                 "needs_confirm": False,
                 "response_url": response_url,
@@ -3725,7 +3806,7 @@ def prepare_reply_from_text(job_id: str, raw_text: str, base_url: str):
                 response_url = tts_line_url(line, None, base_url, job_id, "PharmacyGreeting")
                 if not response_url or response_url == "None":
                     response_url = tts_line_url("Thanks for calling the pharmacy. I can help with prescription refills, medical supply inventory, etc. How can I help?", None, base_url, job_id, "PharmacyGreetingFallback")
-                JOBS[job_id].update({
+                update_state(job_id, {
                     "ready": True,
                     "needs_confirm": False,
                     "response_url": response_url,
@@ -3751,7 +3832,7 @@ def prepare_reply_from_text(job_id: str, raw_text: str, base_url: str):
             if not response_url or response_url == "None":
                 # Fallback to prewarmed generic connection line
                 response_url = tts_line_url("I'll connect you to an associate who can help with that.", None, base_url, job_id, "DeptSkipFallback")
-            JOBS[job_id].update({
+            update_state(job_id, {
                 "ready": True,
                 "needs_confirm": False,
                 "response_url": response_url,
@@ -3769,7 +3850,7 @@ def prepare_reply_from_text(job_id: str, raw_text: str, base_url: str):
                 spoken = msg("connecting_operator", caller_lang)
                 out_name = f"{CACHE_SUBDIR}/op_{job_id}.mp3"
                 response_url = tts_line_url(spoken, out_name, base_url)
-                JOBS[job_id].update({
+                update_state(job_id, {
                     "ready": True,
                     "phase": "operator_ready",
                     "needs_confirm": False,
@@ -3789,7 +3870,7 @@ def prepare_reply_from_text(job_id: str, raw_text: str, base_url: str):
                 line = speak_aisle_answer(item_q, locs, caller_lang)
                 out_name = f"{CACHE_SUBDIR}/aisle_{job_id}.mp3"
                 response_url = tts_line_url(line, out_name, base_url)
-                JOBS[job_id].update({
+                update_state(job_id, {
                     "ready": True,
                     "needs_confirm": False,
                     "response_url": response_url,
@@ -3807,7 +3888,7 @@ def prepare_reply_from_text(job_id: str, raw_text: str, base_url: str):
             if not confirm_url or confirm_url == "None":
                 confirm_url = tts_line_url(msg("yes_no", caller_lang), None, base_url, job_id, "ConfirmFallback")
             time.sleep(0.15)
-            JOBS[job_id].update({
+            update_state(job_id, {
                 "ready": True,
                 "needs_confirm": True,
                 "confirm_url": confirm_url,
@@ -3830,7 +3911,7 @@ def prepare_reply_from_text(job_id: str, raw_text: str, base_url: str):
             msg("reask_cap", "en") if caller_lang=="en" else msg("reask_cap", caller_lang),
         ])
         response_url = tts_line_url(spoken, None, base_url, job_id, "Clarify")
-        JOBS[job_id].update({
+        update_state(job_id, {
             "ready": True,
             "needs_confirm": False,
             "needs_clarify": True,
@@ -3854,7 +3935,7 @@ def prepare_reply_from_text(job_id: str, raw_text: str, base_url: str):
         # Fallback to error response
         spoken = msg("err_global", "en")
         response_url = tts_line_url(spoken, None, base_url, job_id, "Error")
-        JOBS[job_id].update({
+        update_state(job_id, {
             "ready": True,
             "needs_confirm": False,
             "response_url": response_url,
@@ -3870,7 +3951,7 @@ def prepare_reply_from_text(job_id: str, raw_text: str, base_url: str):
             msg("reask_cap", "en") if caller_lang=="en" else msg("reask_cap", caller_lang),
         ])
         response_url = tts_line_url(spoken, None, base_url, job_id, "Clarify")
-        JOBS[job_id].update({
+        update_state(job_id, {
             "ready": True,
             "needs_confirm": False,
             "needs_clarify": True,
@@ -3886,7 +3967,7 @@ def prepare_reply_from_text(job_id: str, raw_text: str, base_url: str):
 
     except Exception as e:
         response_url = tts_line_url(msg("err_global","en"), None, base_url, job_id, "Error")
-        JOBS[job_id].update({
+        update_state(job_id, {
             "ready": True, "needs_confirm": False,
             "response_url": response_url, "needs_clarify": False, "phase": "error"
         })
@@ -3894,7 +3975,8 @@ def prepare_reply_from_text(job_id: str, raw_text: str, base_url: str):
 
 def prepare_final_route(job_id: str, base_url: str, confirmed_text: str):
     try:
-        caller_lang = JOBS.get(job_id,{}).get("caller_lang","en")
+        caller_lang = load_state(job_id) or {}
+        caller_lang = caller_lang.get("caller_lang","en")
         item = confirmed_text or ""
 
         # NEW: check for multiple department candidates
@@ -3941,7 +4023,7 @@ def prepare_final_route(job_id: str, base_url: str, confirmed_text: str):
                     out_name = f"{CACHE_SUBDIR}/direct_coupon_{job_id}.mp3"
                     response_url = tts_line_url(coupon_response, out_name, base_url, job_id, "Direct Coupon")
                     
-                    JOBS[job_id].update({
+                    update_state(job_id, {
                         "ready": True,
                         "needs_confirm": False,
                         "response_url": response_url,
@@ -3964,7 +4046,7 @@ def prepare_final_route(job_id: str, base_url: str, confirmed_text: str):
             out_name = f"{CACHE_SUBDIR}/dept_prompt_{job_id}.mp3"
             prompt_url = tts_line_url(prompt, out_name, base_url)
 
-            JOBS[job_id].update({
+            update_state(job_id, {
                 "ready": True,                 # ready to play the dept prompt
                 "needs_confirm": False,
                 "needs_dept_choice": True,     # NEW branch handled in /result
@@ -4018,7 +4100,7 @@ def prepare_final_route(job_id: str, base_url: str, confirmed_text: str):
         response_url = tts_line_url(spoken, None, base_url, job_id, "Final Response")
         
         if pharmacy_prompt:
-            JOBS[job_id].update({
+            update_state(job_id, {
                 "ready": True,
                 "needs_confirm": False,
                 "response_url": response_url,
@@ -4027,7 +4109,7 @@ def prepare_final_route(job_id: str, base_url: str, confirmed_text: str):
                 "phase": "pharmacy_followup"
             })
         elif coupon_prompt:
-            JOBS[job_id].update({
+            update_state(job_id, {
                 "ready": True,
                 "needs_confirm": False,
                 "response_url": response_url,
@@ -4036,7 +4118,7 @@ def prepare_final_route(job_id: str, base_url: str, confirmed_text: str):
                 "phase": "coupon_followup"
             })
         else:
-            JOBS[job_id].update({
+            update_state(job_id, {
                 "ready": True,
                 "needs_confirm": False,
                 "response_url": response_url,
@@ -4047,7 +4129,7 @@ def prepare_final_route(job_id: str, base_url: str, confirmed_text: str):
         print(f"[JOB {job_id}] final -> {response_url} clarify=False dept={department} lang={caller_lang}")
     except Exception as e:
         response_url = tts_line_url(msg("err_global","en"), None, base_url, job_id, "Error")
-        JOBS[job_id].update({
+        update_state(job_id, {
             "ready": True, "needs_confirm": False,
             "response_url": response_url, "needs_clarify": False, "phase": "error"
         })
@@ -4070,7 +4152,7 @@ def pharmacy_followup():
             print(f"[PHARMACY] TwiML(no job)->\n{str(vr)}")
             return xml_response(vr)
 
-        meta = JOBS[job_id]
+        meta = load_state(job_id)
         base_url = get_base_url()
         caller_lang = meta.get("caller_lang", "en")
 
@@ -4080,7 +4162,7 @@ def pharmacy_followup():
             response_url = tts_line_url(line, None, base_url, job_id, "Pharmacy Timeout")
             vr.play(response_url)
             vr.hangup()
-            JOBS.pop(job_id, None)
+            clear_state(job_id)
             print(f"[PHARMACY] TwiML(timeout)->\n{str(vr)}")
             return xml_response(vr)
         
@@ -4098,7 +4180,7 @@ def pharmacy_followup():
             response_url = tts_line_url(line, None, base_url, job_id, "Pharmacy No Speech")
             vr.play(response_url)
             vr.hangup()
-            JOBS.pop(job_id, None)
+            clear_state(job_id)
             print(f"[PHARMACY] TwiML(no speech)->\n{str(vr)}")
             return xml_response(vr)
 
@@ -4129,7 +4211,7 @@ def pharmacy_followup():
                 if bye_url:
                     vr.play(bye_url)
                 vr.hangup()
-                JOBS.pop(job_id, None)
+                clear_state(job_id)
                 print(f"[PHARMACY] TwiML(goodbye)->\n{str(vr)}")
                 return xml_response(vr)
             if any(term in lowered for term in yes_terms):
@@ -4143,7 +4225,6 @@ def pharmacy_followup():
                     "method": "POST",
                     "language": "es-US" if caller_lang.startswith("es") else "en-US",
                     "timeout": 10,
-                    "speech_timeout": "auto",
                     "profanity_filter": True,
                     "barge_in": True,
                 }))
@@ -4179,7 +4260,7 @@ def pharmacy_followup():
             response_url = tts_line_url(line, None, base_url, job_id, "Pharmacy Direct Connect")
             vr.play(response_url)
             vr.hangup()
-            JOBS.pop(job_id, None)
+            clear_state(job_id)
             print(f"[PHARMACY] Direct pharmacist request -> connecting and hanging up")
             return xml_response(vr)
         
@@ -4218,7 +4299,6 @@ def pharmacy_followup():
             "method": "POST",
             "language": "es-US" if caller_lang.startswith("es") else "en-US",
             "timeout": 10,
-            "speech_timeout": "auto",
             "profanity_filter": True,
             "barge_in": True,
         }))
@@ -4253,7 +4333,7 @@ def coupon_followup():
             print(f"[COUPON] TwiML(no job)->\n{str(vr)}")
             return xml_response(vr)
 
-        meta = JOBS[job_id]
+        meta = load_state(job_id)
         base_url = get_base_url()
         caller_lang = meta.get("caller_lang", "en")
 
@@ -4473,7 +4553,7 @@ def coupon_replay():
             print(f"[COUPON_REPLAY] TwiML(no job)->\n{str(vr)}")
             return xml_response(vr)
 
-        meta = JOBS[job_id]
+        meta = load_state(job_id)
         
         # Check if there's a cached coupon response
         if "cached_coupon_response" in meta:
@@ -4492,7 +4572,6 @@ def coupon_replay():
                 "method": "POST",
                 "language": "en-US",
                 "timeout": 5,
-                "speech_timeout": "auto",
                 "profanity_filter": True,
                 "barge_in": True
             }))
@@ -4504,7 +4583,7 @@ def coupon_replay():
             # No cached response, just hang up
             twiml_play_tts(vr, "Thanks for calling!", "thanks.mp3", job_id, "Coupon Replay Thanks")
             vr.hangup()
-            JOBS.pop(job_id, None)
+            clear_state(job_id)
             print(f"[COUPON_REPLAY] TwiML(no cache)->\n{str(vr)}")
             return xml_response(vr)
             
@@ -4542,7 +4621,7 @@ def result():
             return xml_response(vr)
 
         base_url = get_base_url()
-        meta = JOBS.get(job_id)
+        meta = load_state(job_id)
 
         # Safe fallback for missing/invalid job state
         if not meta:
@@ -4580,7 +4659,7 @@ def result():
             if not meta.get("bg_played", False):
                 vr.play(clip_url)
                 meta["bg_played"] = True
-                JOBS[job_id] = meta
+                save_state(job_id, meta)
                 return True
             return False
 
@@ -4589,7 +4668,7 @@ def result():
             if now - last >= HOLD_MIN_GAP_SEC:
                 vr.play(chirp_url)
                 meta["last_hold_at"] = now
-                JOBS[job_id] = meta
+                save_state(job_id, meta)
             else:
                 vr.pause(length=POLL_PAUSE)
 
@@ -4607,7 +4686,7 @@ def result():
                 vr.play(response_url)
                 d = vr.dial(callerId=None, timeout=20)
                 d.number(op_num)
-                JOBS.pop(job_id, None)
+                clear_state(job_id)
                 print(f"[RESULT] TwiML(timeout transfer)-> duration={call_duration:.1f}s > {CALL_TIMEOUT_SECONDS}s")
                 return xml_response(vr)
             else:
@@ -4617,7 +4696,7 @@ def result():
                 response_url = tts_line_url(timeout_msg, out_name, base_url)
                 vr.play(response_url)
                 vr.hangup()
-                JOBS.pop(job_id, None)
+                clear_state(job_id)
                 
                 # Schedule credit tracking after call ends
                 schedule_end_credit_tracking(job_id, delay_seconds=60)
@@ -4639,7 +4718,7 @@ def result():
                     vr.play(HOLDY_TINY_CDN)
                     meta["first_chirp_done"] = True
                     meta["last_hold_at"] = now
-                    JOBS[job_id] = meta
+                    save_state(job_id, meta)
                 else:
                     # No more tiny chirps during first_hold; keep the line alive tightly
                     vr.pause(length=POLL_PAUSE)
@@ -4656,7 +4735,7 @@ def result():
                         vr.play(HOLDY_MID_CDN)
                     meta["mid_hold_played"] = True
                     meta.setdefault("bg_played", HOLD_BG_CDN == "")
-                    JOBS[job_id] = meta
+                    save_state(job_id, meta)
                 else:
                     if HOLD_BG_CDN:
                         _ = maybe_play_ambience(HOLD_BG_CDN) or vr.pause(length=max(1, POLL_PAUSE))
@@ -4681,7 +4760,7 @@ def result():
             vr.play(meta["response_url"])
             d = vr.dial(callerId=None, timeout=20)
             d.number(meta["op_number"])
-            JOBS.pop(job_id, None)
+            clear_state(job_id)
             print(f"[RESULT] TwiML(operator dial)->\n{str(vr)}")
             return xml_response(vr)
         
@@ -4695,7 +4774,6 @@ def result():
                 "method": "POST",
                 "language": "es-US" if caller_lang.startswith("es") else "en-US",
                 "timeout": max(5, CONF_TIMEOUT + 3),      # you had 6s; keep it
-                "speech_timeout": "auto",
                 "profanity_filter": True,
                 "barge_in": True
             }))
@@ -4719,7 +4797,7 @@ def result():
 
             # bump attempts and persist
             meta["dept_attempt"] = attempt + 1
-            JOBS[job_id] = meta
+            save_state(job_id, meta)
 
             vr.append(g)
             vr.redirect(result_url, method="POST")
@@ -4736,7 +4814,6 @@ def result():
                 "method": "POST",
                 "language": "es-US" if caller_lang.startswith("es") else "en-US",
                 "timeout": 10,  # Give more time for pharmacy responses
-                "speech_timeout": "auto",
                 "profanity_filter": True,
                 "barge_in": True
             }))
@@ -4754,7 +4831,6 @@ def result():
                 "method": "POST",
                 "language": "es-US" if caller_lang.startswith("es") else "en-US",
                 "timeout": 10,  # Give more time for coupon responses
-                "speech_timeout": "auto",
                 "profanity_filter": True,
                 "barge_in": True
             }))
@@ -4771,7 +4847,7 @@ def result():
 
             round_num = int(meta.get("confirm_round", 0)) + 1
             meta["confirm_round"] = round_num
-            JOBS[job_id] = meta
+            save_state(job_id, meta)
 
             primary_lang = "es-US" if caller_lang.startswith("es") else "en-US"
 
@@ -4780,7 +4856,6 @@ def result():
                 "method": "POST",
                 "language": primary_lang,
                 "timeout": CONF_TIMEOUT,
-                "speech_timeout": "auto",
                 "profanity_filter": True,
                 "barge_in": True
             }))
@@ -4801,7 +4876,6 @@ def result():
                     "method": "POST",
                     "language": "es-US",
                     "timeout": max(1, CONF_TIMEOUT),
-                    "speech_timeout": "auto",
                     "profanity_filter": True,
                     "barge_in": True
                 }))
@@ -4825,7 +4899,6 @@ def result():
                     "method": "POST",
                     "language": lang_code,
                     "timeout": CONF_TIMEOUT,
-                    "speech_timeout": "auto",
                     "profanity_filter": True,
                     "barge_in": True
                 }))
@@ -4847,7 +4920,6 @@ def result():
                 "method": "POST",
                 "language": "es-US" if caller_lang.startswith("es") else "en-US",
                 "timeout": 8,  # Give time for response
-                "speech_timeout": "auto",
                 "profanity_filter": True,
                 "barge_in": True
             }))
@@ -4859,7 +4931,7 @@ def result():
         if meta.get("response_url"):
             vr.play(meta["response_url"])
             vr.hangup()
-            JOBS.pop(job_id, None)
+            clear_state(job_id)
             
             # Schedule credit tracking after call ends (with delay to ensure usage is updated)
             schedule_end_credit_tracking(job_id, delay_seconds=60)
@@ -4901,7 +4973,7 @@ def followup_response():
             print(f"[FOLLOWUP] TwiML(no job)->\n{str(vr)}")
             return xml_response(vr)
 
-        meta = JOBS[job_id]
+        meta = load_state(job_id)
         caller_lang = meta.get("caller_lang","en")
         
         # Get the customer's response
@@ -4928,7 +5000,7 @@ def followup_response():
             response_url = tts_line_url(goodbye_msg, out_name, get_base_url())
             vr.play(response_url)
             vr.hangup()
-            JOBS.pop(job_id, None)
+            clear_state(job_id)
             
             # Schedule credit tracking after call ends
             schedule_end_credit_tracking(job_id, delay_seconds=60)
@@ -4944,7 +5016,7 @@ def followup_response():
                 "polls": 0,
                 "waiting_for_followup": False
             })
-            JOBS[job_id] = meta
+            save_state(job_id, meta)
             
             # Process the new question using the normal flow
             # Reset the job state and process as a new request
@@ -4954,7 +5026,7 @@ def followup_response():
                 "polls": 0,
                 "waiting_for_followup": False
             })
-            JOBS[job_id] = meta
+            save_state(job_id, meta)
             
             # Use the normal prepare_reply_from_text flow
             threading.Thread(
@@ -4988,7 +5060,7 @@ def holdy_then_result():
             print(f"[HOLDY] TwiML(no job)->\n{str(vr)}")
             return xml_response(vr)
         
-        meta = JOBS[job_id]
+        meta = load_state(job_id)
         
         # Play holdy MP3, then redirect to result polling
         vr = VoiceResponse()
@@ -5016,7 +5088,7 @@ def confirm():
             print(f"[CONFIRM] TwiML(no job)->\n{str(vr)}")
             return xml_response(vr)
 
-        meta = JOBS[job_id]
+        meta = load_state(job_id)
         caller_lang = meta.get("caller_lang","en")
 
         if meta.get("confirm_done"):
@@ -5039,7 +5111,6 @@ def confirm():
                     "method": "POST",
                     "language": "es-US" if caller_lang.startswith("es") else "en-US",
                     "timeout": max(1, CONF_TIMEOUT),
-                    "speech_timeout": "auto",
                     "profanity_filter": True,
                     "barge_in": True
                 }))
@@ -5063,7 +5134,6 @@ def confirm():
                     "method": "POST",
                     "language": "es-US" if caller_lang.startswith("es") else "en-US",
                     "timeout": max(1, CONF_TIMEOUT),
-                    "speech_timeout": "auto",
                     "profanity_filter": True,
                     "barge_in": True
                 }))
@@ -5088,7 +5158,7 @@ def confirm():
                     "op_number": op_num,
                     "response_url": response_url
                 })
-                JOBS[job_id] = meta
+                save_state(job_id, meta)
                 vr.redirect(_result_poll_url(get_base_url(), job_id, meta), method="POST")
                 print(f"[CONFIRM] Operator requested -> dialing {op_num}")
                 return xml_response(vr)
@@ -5134,7 +5204,7 @@ def confirm():
                 "last_hold_at": time.time(),
                 "correction_hops": 0,
             })
-            JOBS[job_id] = meta
+            save_state(job_id, meta)
             print(f"[CONFIRM] YES -> starting final routing for job={job_id}")
 
             threading.Thread(
@@ -5223,7 +5293,7 @@ def confirm():
             hops = int(meta.get("correction_hops", 0)) + 1
             if hops > CORRECTION_HOPS_MAX:
                 meta.update({"confirm_done": True, "needs_confirm": False, "phase": "reask", "bg_played": False})
-                JOBS[job_id] = meta
+                save_state(job_id, meta)
                 twiml_play_tts(vr, msg("reask_cap", caller_lang), "tts_cache/reask_cap.mp3" if caller_lang=="en" else f"{CACHE_SUBDIR}/reask_cap_{caller_lang}.mp3")
                 # NEW: use Gather for fresh item if enabled
                 if USE_GATHER_MAIN:
@@ -5233,7 +5303,6 @@ def confirm():
                         "method": "POST",
                         "language": _primary_lang_code(caller_lang),
                         "timeout": CONF_TIMEOUT,
-                        "speech_timeout": "auto",
                         "profanity_filter": True,
                         "barge_in": True
                     }))
@@ -5255,7 +5324,7 @@ def confirm():
                 "last_hold_at": time.time(),
                 "correction_hops": hops,
             })
-            JOBS[job_id] = meta
+            save_state(job_id, meta)
             print(f"[CONFIRM] ACCEPT corrected item -> {candidate} (hop {hops}/{CORRECTION_HOPS_MAX}); routing final")
 
             threading.Thread(
@@ -5275,7 +5344,6 @@ def confirm():
             "method": "POST",
             "language": "es-US" if caller_lang.startswith("es") else "en-US",
             "timeout": max(1, CONF_TIMEOUT),
-            "speech_timeout": "auto",
             "profanity_filter": True,
             "barge_in": True
         }))
@@ -5308,7 +5376,7 @@ if DIAG_TWILIO:
             method="POST",
             action=abs_url(url_for("diag_handle")),
             timeout=int(os.getenv("GATHER_TIMEOUT","7")),
-            speechTimeout=os.getenv("GATHER_SPEECH_TIMEOUT","auto"),
+            speechTimeout=str(max(int(os.getenv("GATHER_TIMEOUT","5")), 7)),
             enhanced=True,
             actionOnEmptyResult=True,
             # phone_call model is best for PSTN; if Twilio account doesn't support it,
@@ -5378,12 +5446,8 @@ def voice_post():
         # Correct route + correct locale code for Twilio
         g = Gather(**gather_kwargs({
             "action": abs_url(url_for("handle_gather", call_id=call_id, t0=int(time.time()))),
-            "method": "POST",
             "language": _primary_lang_code(DEFAULT_LANG),
             "timeout": max(4, CONF_TIMEOUT),
-            "speech_timeout": "auto",
-            "profanity_filter": True,
-            "barge_in": True
         }))
         g.play(abs_url(greet_url))
         vr.append(g)
@@ -5460,7 +5524,7 @@ def handle_gather():
         job_id = call_id  # Use call_id as job_id for credit tracking
         caller_lang_guess = quick_lang_guess(speech, DEFAULT_LANG)
 
-        JOBS[job_id] = {
+        save_state(job_id, {
             "ready": False,
             "phase": "first_hold",
             "created_at": time.time(),
@@ -5471,7 +5535,7 @@ def handle_gather():
             "correction_hops": 0,
             "caller_lang": caller_lang_guess,
             "suspect_spanish": caller_lang_guess.startswith("es"),
-        }
+        })
 
         # Don't play holdy MP3 here - it will be played in the result polling
         vr = VoiceResponse()
@@ -5482,7 +5546,7 @@ def handle_gather():
             daemon=True
         ).start()
 
-        vr.redirect(_result_poll_url(get_base_url(), job_id, JOBS[job_id]), method="POST")
+        vr.redirect(_result_poll_url(get_base_url(), job_id, load_state(job_id)), method="POST")
         print(f"[HANDLE_GATHER] TwiML ->\n{str(vr)}")
         return xml_response(vr)
 
@@ -5509,7 +5573,7 @@ def dept_choice():
             vr.hangup()
             return xml_response(vr)
 
-        meta = JOBS[job_id]
+        meta = load_state(job_id)
         caller_lang = meta.get("caller_lang","en")
         options = meta.get("dept_options", [])
         item = meta.get("heard_text","")
@@ -5552,7 +5616,6 @@ def dept_choice():
                 "method": "POST",
                 "language": "es-US" if caller_lang.startswith("es") else "en-US",
                 "timeout": max(1, CONF_TIMEOUT),
-                "speech_timeout": "auto",
                 "profanity_filter": True,
                 "barge_in": True
             }))
@@ -5589,7 +5652,7 @@ def dept_choice():
             "department": chosen,
             "phase": "final_ready"
         })
-        JOBS[job_id] = meta
+        save_state(job_id, meta)
 
         vr.redirect(_result_poll_url(get_base_url(), job_id, meta), method="POST")
         print(f"[DEPT_CHOICE] chosen={chosen} -> finalizing")
@@ -5614,7 +5677,7 @@ def handle_recording():
             return xml_response(vr)
 
         job_id = str(uuid.uuid4())
-        JOBS[job_id] = {
+        save_state(job_id, {
             "ready": False,
             "phase": "first_hold",
             "created_at": time.time(),
@@ -5625,7 +5688,7 @@ def handle_recording():
             "correction_hops": 0,
             "caller_lang": DEFAULT_LANG,
             "suspect_spanish": False,
-        }
+        })
 
         threading.Thread(
             target=prepare_reply_from_recording,
@@ -5634,7 +5697,7 @@ def handle_recording():
         ).start()
 
         vr = VoiceResponse()
-        vr.redirect(_result_poll_url(get_base_url(), job_id, JOBS[job_id]), method="POST")
+        vr.redirect(_result_poll_url(get_base_url(), job_id, load_state(job_id)), method="POST")
         print(f"[HANDLE] TwiML ->\n{str(vr)}")
         return xml_response(vr)
 
@@ -6203,7 +6266,6 @@ def sms_consent():
 	with vr.gather(
 		input="speech",
 		language="en-US",
-		speech_timeout="auto",
 		barge_in=True,
 		method="POST",
 		action=action_url

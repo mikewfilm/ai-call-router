@@ -13,6 +13,7 @@ faster-whisper==1.0.3
 # --- HTTP/API dependencies ---
 requests
 twilio
+redis>=5.0.0
 
 # --- WebSocket dependencies ---
 flask-sock
