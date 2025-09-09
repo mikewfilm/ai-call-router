@@ -1089,6 +1089,11 @@ def _get_whisper_impl():
 
 app = Flask(__name__, static_folder="static")
 
+# Configure ProxyFix for Railway deployment
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+app.config.setdefault("PREFERRED_URL_SCHEME", "https")
+
 @app.after_request
 def _force_twiml_xml(resp):
     try:
@@ -1117,6 +1122,17 @@ def get_base_url() -> str:
             # Called outside of request context (e.g., during startup)
             base = "https://91f78cab40b1.ngrok-free.app"
     return base
+
+# Helper for absolute HTTPS URLs
+from urllib.parse import urljoin
+PUBLIC_HTTP_BASE = os.getenv("PUBLIC_HTTP_BASE", "").rstrip("/")
+
+def abs_url(path: str) -> str:
+    """Always return https absolute URL"""
+    if path.startswith("http://") or path.startswith("https://"):
+        return path.replace("http://", "https://", 1)
+    base = PUBLIC_HTTP_BASE or (request.url_root if request else "")
+    return urljoin(base, path).replace("http://", "https://", 1)
 
 def static_file_url(relpath: str) -> str:
     base = get_base_url()
@@ -4433,7 +4449,7 @@ def coupon_replay():
             # Gather for another replay request
             g = Gather(**gather_kwargs({
                 "input": "speech dtmf",
-                "action": f"{get_base_url()}/coupon_replay?job={job_id}",
+                "action": abs_url(url_for("coupon_replay", job=job_id)),
                 "method": "POST",
                 "language": "en-US",
                 "timeout": 5,
@@ -4463,7 +4479,7 @@ def coupon_replay():
 def _result_poll_url(base_url: str, job_id: str, meta: dict) -> str:
     cnt = meta.get("polls", 0) + 1
     meta["polls"] = cnt
-    return f"{base_url}/result?job={job_id}&n={cnt}&t={int(time.time()*1000)}"
+    return abs_url(f"/result?job={job_id}&n={cnt}&t={int(time.time()*1000)}")
 
 @app.route("/result", methods=["GET", "POST"])
 def result():
@@ -4980,7 +4996,7 @@ def confirm():
             if not recording_url:
                 twiml_play_tts(vr, msg("err_confirm", caller_lang), "didnt_catch_confirm.mp3")
                 g = Gather(**gather_kwargs({
-                    "action": f"{get_base_url()}/confirm?job={job_id}",
+                    "action": abs_url(url_for("confirm", job=job_id)),
                     "method": "POST",
                     "language": "es-US" if caller_lang.startswith("es") else "en-US",
                     "timeout": max(1, CONF_TIMEOUT),
@@ -5004,7 +5020,7 @@ def confirm():
                 logger.warning("Local Whisper not available for confirm; falling back to Gather")
                 vr = VoiceResponse()
                 g = Gather(**gather_kwargs({
-                    "action": f"{get_base_url()}/confirm?job={job_id}",
+                    "action": abs_url(url_for("confirm", job=job_id)),
                     "method": "POST",
                     "language": "es-US" if caller_lang.startswith("es") else "en-US",
                     "timeout": max(1, CONF_TIMEOUT),
@@ -5173,7 +5189,7 @@ def confirm():
                 # NEW: use Gather for fresh item if enabled
                 if USE_GATHER_MAIN:
                     g = Gather(**gather_kwargs({
-                        "action": f"{get_base_url()}/handle_gather",
+                        "action": abs_url(url_for("handle_gather")),
                         "method": "POST",
                         "language": _primary_lang_code(caller_lang),
                         "timeout": CONF_TIMEOUT,
@@ -5183,7 +5199,7 @@ def confirm():
                     }))
                     vr.append(g)
                 else:
-                    vr.record(**record_args(f"{get_base_url()}/handle", MAIN_MAXLEN, MAIN_TIMEOUT, beep_override=False))
+                    vr.record(**record_args(abs_url(url_for("handle")), MAIN_MAXLEN, MAIN_TIMEOUT, beep_override=False))
                 print(f"[CONFIRM] Hit correction hop cap ({CORRECTION_HOPS_MAX}); re-asking.")
                 return xml_response(vr)
 
@@ -5215,7 +5231,7 @@ def confirm():
         # unclear -> ask again (localized) with barge-in
         prompt_line = msg("yes_no", caller_lang)
         g = Gather(**gather_kwargs({
-            "action": f"{get_base_url()}/confirm?job={job_id}",
+            "action": abs_url(url_for("confirm", job=job_id)),
             "method": "POST",
             "language": "es-US" if caller_lang.startswith("es") else "en-US",
             "timeout": max(1, CONF_TIMEOUT),
@@ -5269,7 +5285,7 @@ def voice_post():
     if USE_GATHER_MAIN:
         # Correct route + correct locale code for Twilio
         g = Gather(**gather_kwargs({
-            "action": f"{get_base_url()}/handle_gather?call_id={call_id}",
+            "action": abs_url(url_for("handle_gather", call_id=call_id)),
             "method": "POST",
             "language": _primary_lang_code(DEFAULT_LANG),
             "timeout": max(4, CONF_TIMEOUT),
@@ -5277,11 +5293,11 @@ def voice_post():
             "profanity_filter": True,
             "barge_in": True
         }))
-        g.play(greet_url)
+        g.play(abs_url(greet_url))
         vr.append(g)
     else:
         # Record-first fallback (correct action path)
-        vr.record(**record_args(f"{get_base_url()}/handle", MAIN_MAXLEN, MAIN_TIMEOUT, beep_override=False))
+        vr.record(**record_args(abs_url(url_for("handle")), MAIN_MAXLEN, MAIN_TIMEOUT, beep_override=False))
 
     return xml_response(vr)
 
@@ -5301,11 +5317,11 @@ def handle_gather():
                 vr = VoiceResponse()
                 call_id = request.args.get("call_id") or request.form.get("call_id") or str(uuid.uuid4())
                 g = Gather(**gather_kwargs({
-                    "action": url_for("handle_gather", _external=True, call_id=call_id, n=n+1),
+                    "action": abs_url(url_for("handle_gather", call_id=call_id, n=n+1)),
                     "method": "POST",
                 }))
                 # Use a short "didn't catch that" message
-                no_input_url = url_for("static", filename="tts_cache/no_recording.mp3", _external=True)
+                no_input_url = abs_url(url_for("static", filename="tts_cache/no_recording.mp3"))
                 g.play(no_input_url)
                 vr.append(g)
                 return xml_response(vr)
@@ -5409,7 +5425,7 @@ def dept_choice():
                 f"Por favor diga {', '.join(options[:-1])} o {options[-1]}."
             )
             g = Gather(**gather_kwargs({
-                "action": f"{get_base_url()}/dept_choice?job={job_id}",
+                "action": abs_url(url_for("dept_choice", job=job_id)),
                 "method": "POST",
                 "language": "es-US" if caller_lang.startswith("es") else "en-US",
                 "timeout": max(1, CONF_TIMEOUT),
@@ -5541,7 +5557,7 @@ def tw_record_canary():
     vr = VoiceResponse()
     vr.say("Beep. Say anything for a second.")
     vr.record(
-        action=f"{get_base_url()}/tw_record_done",
+        action=abs_url(url_for("tw_record_done")),
         method="POST",
         maxLength=3,
         timeout=1,
@@ -6054,7 +6070,7 @@ def sms_consent():
 	mp3 = build_consent_prompt(job or "nojob")  # your single-voice "text" line
 
 	# Use local consent handling instead of external service
-	action_url = f"{get_base_url()}/consent_continue"
+	action_url = abs_url(url_for("consent_continue"))
 	if job:
 		action_url += f"?job={job}"
 	app.logger.info(f"[CONSENT] Using local consent URL: '{action_url}'")
