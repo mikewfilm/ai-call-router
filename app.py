@@ -5290,10 +5290,31 @@ def voice_post():
 def handle_gather():
     """First utterance via Twilio Gather (speech). Fast and noise-safe."""
     try:
-        speech = request.form.get("SpeechResult") or ""
-        if not speech.strip():
+        # Read parameters
+        n = int(request.args.get("n", "1"))
+        sr = (request.form.get("SpeechResult") or "").strip()
+        
+        if not sr:
+            logging.info("[ASR-GATHER] empty SpeechResult; reprompting (n=%s)", n)
+            if n <= 1:
+                # Build a reprompt TwiML that listens again
+                vr = VoiceResponse()
+                call_id = request.args.get("call_id") or request.form.get("call_id") or str(uuid.uuid4())
+                g = Gather(**gather_kwargs({
+                    "action": url_for("handle_gather", _external=True, call_id=call_id, n=n+1),
+                    "method": "POST",
+                }))
+                # Use a short "didn't catch that" message
+                no_input_url = url_for("static", filename="tts_cache/no_recording.mp3", _external=True)
+                g.play(no_input_url)
+                vr.append(g)
+                return xml_response(vr)
+            
+            # else n > 1 ⇒ keep current fallback (no_recording + Hangup). Do nothing here and let existing code run.
             # No speech caught -> fall back to your normal /handle record flow
             return handle_recording()
+        
+        speech = sr
 
         # Get call_id from voice_post or generate new one
         call_id = request.args.get("call_id") or request.form.get("call_id") or str(uuid.uuid4())
