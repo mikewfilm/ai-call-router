@@ -5264,7 +5264,6 @@ def voice_post():
     print(f"[VOICE] greet_url -> {greet_url} (lang={DEFAULT_LANG}, gather_main={USE_GATHER_MAIN})")
 
     vr = VoiceResponse()
-    vr.play(greet_url)
 
     if USE_GATHER_MAIN:
         # Correct route + correct locale code for Twilio
@@ -5277,6 +5276,7 @@ def voice_post():
             "profanity_filter": True,
             "barge_in": True
         }))
+        g.play(greet_url)
         vr.append(g)
     else:
         # Record-first fallback (correct action path)
