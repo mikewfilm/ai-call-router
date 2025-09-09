@@ -733,6 +733,7 @@ def gather_kwargs(overrides: dict | None = None) -> dict:
         "timeout": GATHER_TIMEOUT,      # dtmf timeout; harmless to include
         "speechTimeout": GATHER_SPEECH_TIMEOUT,
         "hints": GATHER_HINTS,
+        "actionOnEmptyResult": True,    # Twilio should POST to action even on empty result
         # keep existing action/method from call sites
     }
     if overrides:
