@@ -723,6 +723,7 @@ GATHER_HINTS = os.getenv(
 )
 # Use Twilio's enhanced speech model
 GATHER_ENHANCED = os.getenv("GATHER_ENHANCED", "1") in ("1", "true", "True")
+GATHER_MAX_ATTEMPTS = int(os.getenv("GATHER_MAX_ATTEMPTS", "3"))
 
 def gather_kwargs(overrides: dict | None = None) -> dict:
     """Build consistent kwargs for Twilio <Gather> speech recognition."""
@@ -5311,24 +5312,24 @@ def handle_gather():
         sr = (request.form.get("SpeechResult") or "").strip()
         
         if not sr:
-            logging.info("[ASR-GATHER] empty SpeechResult; reprompting (n=%s)", n)
-            if n <= 1:
-                # Build a reprompt TwiML that listens again
+            if n < GATHER_MAX_ATTEMPTS:
+                # reprompt
                 vr = VoiceResponse()
                 call_id = request.args.get("call_id") or request.form.get("call_id") or str(uuid.uuid4())
-                g = Gather(**gather_kwargs({
-                    "action": abs_url(url_for("handle_gather", call_id=call_id, n=n+1)),
-                    "method": "POST",
-                }))
-                # Use a short "didn't catch that" message
-                no_input_url = abs_url(url_for("static", filename="tts_cache/no_recording.mp3"))
-                g.play(no_input_url)
+                g = Gather(**gather_kwargs({"action": abs_url(url_for("handle_gather", call_id=call_id, n=n+1)),
+                                           "method": "POST",
+                                           "bargeIn": True,
+                                           "profanityFilter": True}))
+                # pick reprompt audio
+                reprompt = static_file_url("tts_cache/reprompt_listening.mp3")
+                if not os.path.exists(os.path.join(app.static_folder, "tts_cache/reprompt_listening.mp3")):
+                    reprompt = static_file_url("tts_cache/no_recording.mp3")
+                g.play(reprompt)
                 vr.append(g)
                 return xml_response(vr)
-            
-            # else n > 1 ⇒ keep current fallback (no_recording + Hangup). Do nothing here and let existing code run.
-            # No speech caught -> fall back to your normal /handle record flow
-            return handle_recording()
+            else:
+                # exhausted attempts → existing behavior
+                return handle_recording()
         
         speech = sr
 
