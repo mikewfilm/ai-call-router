@@ -4467,8 +4467,12 @@ def _result_poll_url(base_url: str, job_id: str, meta: dict) -> str:
 def result():
     try:
         job_id = request.args.get("job") or request.form.get("job")
-        vr = VoiceResponse()
+        n = request.args.get("n") or request.form.get("n") or "0"
+        
+        # Safe fallback for missing/invalid job_id
         if not job_id:
+            logging.warning(f"[RESULT] Missing job_id in request")
+            vr = VoiceResponse()
             twiml_play_tts(vr, "Sorry, there was an error. Goodbye.", "err_no_job.mp3")
             vr.hangup()
             print(f"[RESULT] TwiML(no job)->\n{str(vr)}")
@@ -4477,16 +4481,37 @@ def result():
         base_url = get_base_url()
         meta = JOBS.get(job_id)
 
+        # Safe fallback for missing/invalid job state
         if not meta:
-            result_url = _result_poll_url(base_url, job_id, {"polls": 1, "last_hold_at": time.time()})
+            # Check if we've exceeded max polling attempts
+            try:
+                poll_count = int(n)
+                if poll_count >= 8:  # Max polling attempts
+                    logging.warning(f"[RESULT] Max polling attempts reached for job {job_id}")
+                    vr = VoiceResponse()
+                    twiml_play_tts(vr, "I'm having trouble processing your request. Please call back later. Goodbye.", "err_max_polls.mp3")
+                    vr.hangup()
+                    print(f"[RESULT] TwiML(max polls reached)->\n{str(vr)}")
+                    return xml_response(vr)
+            except (ValueError, TypeError):
+                poll_count = 0
+            
+            # Safe fallback with polling
+            next_n = min(poll_count + 1, 8)
+            result_url = f"{base_url}/result?job={job_id}&n={next_n}&t={int(time.time()*1000)}"
+            vr = VoiceResponse()
             vr.play(HOLDY_TINY_CDN)
             INITIAL_CHIRPED.add(job_id)
             vr.redirect(result_url, method="POST")
+            logging.warning(f"[RESULT] Missing job state for {job_id}, polling attempt {next_n}")
             print(f"[RESULT] TwiML(no meta)->\n{str(vr)}")
             return xml_response(vr)
 
         result_url = _result_poll_url(base_url, job_id, meta)
         now = time.time()
+        
+        # Log normal processing
+        logging.info(f"[RESULT] Processing job {job_id}, phase: {meta.get('phase', 'unknown')}, ready: {meta.get('ready', False)}")
 
         def maybe_play_ambience(clip_url):
             if not clip_url:
@@ -4791,6 +4816,7 @@ def result():
         return xml_response(vr)
 
     except Exception as e:
+        logging.error(f"[RESULT] Exception in /result route: {e}")
         print(f"[RESULT] Exception -> {e}\n{traceback.format_exc()}")
         vr = VoiceResponse()
         twiml_play_tts(vr, msg("err_global","en"), "tts_cache/err_result.mp3")
