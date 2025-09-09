@@ -26,3 +26,5 @@ flask-sock
 simple-websocket
 
 beautifulsoup4
+
+wikipedia
