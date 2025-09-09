@@ -710,6 +710,35 @@ HOLD_MIN_GAP_FORCE_ZERO = safe_bool_env("HOLD_MIN_GAP_FORCE_ZERO", False)
 HOLD_MIN_GAP_SEC = 0.0 if HOLD_MIN_GAP_FORCE_ZERO else max(1.2, safe_float_env("HOLD_MIN_GAP_SEC", 1.2))
 CORRECTION_HOPS_MAX = clamp_int(safe_int_env("CORRECTION_HOPS_MAX", 2), 1, 5, "CORRECTION_HOPS_MAX")
 
+# --- ASR / Twilio Gather tuning (configurable via env) ---
+GATHER_LANGUAGE = os.getenv("GATHER_LANGUAGE", "en-US")
+# Overall silence timeout (seconds) before Gather ends; for speech we also set speechTimeout.
+GATHER_TIMEOUT = int(os.getenv("GATHER_TIMEOUT", "5"))
+# "auto" lets Twilio decide when the caller stopped speaking; you can set a number (e.g., "3") too.
+GATHER_SPEECH_TIMEOUT = os.getenv("GATHER_SPEECH_TIMEOUT", "auto")
+# Comma-separated phrases to bias recognition toward store vocabulary.
+GATHER_HINTS = os.getenv(
+    "GATHER_HINTS",
+    "bananas, pharmacy, prescriptions, coupons, produce, deli, bakery, customer service"
+)
+# Use Twilio's enhanced speech model
+GATHER_ENHANCED = os.getenv("GATHER_ENHANCED", "1") in ("1", "true", "True")
+
+def gather_kwargs(overrides: dict | None = None) -> dict:
+    """Build consistent kwargs for Twilio <Gather> speech recognition."""
+    base = {
+        "input": "speech",              # speech-only; add " dtmf" if you want dual input
+        "language": GATHER_LANGUAGE,
+        "enhanced": GATHER_ENHANCED,
+        "timeout": GATHER_TIMEOUT,      # dtmf timeout; harmless to include
+        "speechTimeout": GATHER_SPEECH_TIMEOUT,
+        "hints": GATHER_HINTS,
+        # keep existing action/method from call sites
+    }
+    if overrides:
+        base.update({k: v for k, v in overrides.items() if v is not None})
+    return base
+
 def log_effective_config():
     print("[CONFIG] PUBLIC_BASE_URL =", PUBLIC_BASE_URL or "(auto from request.url_root)")
     print("[CONFIG] USE_FILLER      =", USE_FILLER)
@@ -1059,6 +1088,16 @@ def _get_whisper_impl():
 
 app = Flask(__name__, static_folder="static")
 
+@app.after_request
+def _force_twiml_xml(resp):
+    try:
+        body = (resp.get_data(as_text=True) or "").lstrip()
+        if body.startswith("<?xml") or body.startswith("<Response"):
+            resp.mimetype = "text/xml"
+    except Exception:
+        pass
+    return resp
+
 def ensure_static_dir():
     os.makedirs(app.static_folder, exist_ok=True)
 
@@ -1086,7 +1125,7 @@ def static_file_url(relpath: str) -> str:
     return f"{base}/static/{rel}"
 
 def xml_response(vr: VoiceResponse) -> Response:
-	return Response(str(vr), content_type="application/xml")
+	return Response(str(vr), mimetype="text/xml")
 
 CACHE_SUBDIR = "tts_cache"
 
@@ -4042,16 +4081,15 @@ def pharmacy_followup():
                 follow_url = tts_line_url(follow_text, None, base_url, job_id, "Pharmacy WhatElse")
                 if follow_url:
                     vr.play(follow_url)
-                g = Gather(
-                    input="speech",
-                    action=f"{base_url}/pharmacy_followup?job={job_id}",
-                    method="POST",
-                    language="es-US" if caller_lang.startswith("es") else "en-US",
-                    timeout=10,
-                    speech_timeout="auto",
-                    profanity_filter=True,
-                    barge_in=True,
-                )
+                g = Gather(**gather_kwargs({
+                    "action": f"{base_url}/pharmacy_followup?job={job_id}",
+                    "method": "POST",
+                    "language": "es-US" if caller_lang.startswith("es") else "en-US",
+                    "timeout": 10,
+                    "speech_timeout": "auto",
+                    "profanity_filter": True,
+                    "barge_in": True,
+                }))
                 vr.append(g)
                 meta["asked_anything_else"] = False
                 print(f"[PHARMACY] TwiML(yes -> keep gathering)->\n{str(vr)}")
@@ -4118,16 +4156,15 @@ def pharmacy_followup():
         else:
             meta["asked_anything_else"] = False
 
-        g = Gather(
-            input="speech",
-            action=f"{base_url}/pharmacy_followup?job={job_id}",
-            method="POST",
-            language="es-US" if caller_lang.startswith("es") else "en-US",
-            timeout=10,
-            speech_timeout="auto",
-            profanity_filter=True,
-            barge_in=True,
-        )
+        g = Gather(**gather_kwargs({
+            "action": f"{base_url}/pharmacy_followup?job={job_id}",
+            "method": "POST",
+            "language": "es-US" if caller_lang.startswith("es") else "en-US",
+            "timeout": 10,
+            "speech_timeout": "auto",
+            "profanity_filter": True,
+            "barge_in": True,
+        }))
         vr.append(g)
 
         # Keep job context for continued pharmacy dialogue
@@ -4392,16 +4429,16 @@ def coupon_replay():
             vr.play(replay_url)
             
             # Gather for another replay request
-            g = Gather(
-                input="speech dtmf",
-                action=f"{get_base_url()}/coupon_replay?job={job_id}",
-                method="POST",
-                language="en-US",
-                timeout=5,
-                speech_timeout="auto",
-                profanity_filter=True,
-                barge_in=True
-            )
+            g = Gather(**gather_kwargs({
+                "input": "speech dtmf",
+                "action": f"{get_base_url()}/coupon_replay?job={job_id}",
+                "method": "POST",
+                "language": "en-US",
+                "timeout": 5,
+                "speech_timeout": "auto",
+                "profanity_filter": True,
+                "barge_in": True
+            }))
             vr.append(g)
             
             print(f"[COUPON_REPLAY] TwiML(replay)->\n{str(vr)}")
@@ -4567,16 +4604,15 @@ def result():
             caller_lang = meta.get("caller_lang","en")
             attempt = int(meta.get("dept_attempt", 0))
 
-            g = Gather(
-                input="speech",
-                action=f"{base_url}/dept_choice?job={job_id}",
-                method="POST",
-                language="es-US" if caller_lang.startswith("es") else "en-US",
-                timeout=max(5, CONF_TIMEOUT + 3),      # you had 6s; keep it
-                speech_timeout="auto",
-                profanity_filter=True,
-                barge_in=True
-            )
+            g = Gather(**gather_kwargs({
+                "action": f"{base_url}/dept_choice?job={job_id}",
+                "method": "POST",
+                "language": "es-US" if caller_lang.startswith("es") else "en-US",
+                "timeout": max(5, CONF_TIMEOUT + 3),      # you had 6s; keep it
+                "speech_timeout": "auto",
+                "profanity_filter": True,
+                "barge_in": True
+            }))
 
             # Attempt #1: play prompt only (no chirp)
             if attempt == 0:
@@ -4609,16 +4645,15 @@ def result():
             caller_lang = meta.get("caller_lang","en")
             # Play the prompt line, then Gather the follow-up so caller can say RX number / phone / "same as last time"
             vr.play(meta["response_url"])
-            g = Gather(
-                input="speech",
-                action=f"{base_url}/pharmacy_followup?job={job_id}",
-                method="POST",
-                language="es-US" if caller_lang.startswith("es") else "en-US",
-                timeout=10,  # Give more time for pharmacy responses
-                speech_timeout="auto",
-                profanity_filter=True,
-                barge_in=True
-            )
+            g = Gather(**gather_kwargs({
+                "action": f"{base_url}/pharmacy_followup?job={job_id}",
+                "method": "POST",
+                "language": "es-US" if caller_lang.startswith("es") else "en-US",
+                "timeout": 10,  # Give more time for pharmacy responses
+                "speech_timeout": "auto",
+                "profanity_filter": True,
+                "barge_in": True
+            }))
             vr.append(g)
             print(f"[RESULT] TwiML(pharmacy follow-up gather)->\n{str(vr)}")
             return xml_response(vr)
@@ -4628,16 +4663,15 @@ def result():
             caller_lang = meta.get("caller_lang","en")
             # Play the coupon summary, then Gather the follow-up so caller can ask for specific items
             vr.play(meta["response_url"])
-            g = Gather(
-                input="speech",
-                action=f"{base_url}/coupon_followup?job={job_id}",
-                method="POST",
-                language="es-US" if caller_lang.startswith("es") else "en-US",
-                timeout=10,  # Give more time for coupon responses
-                speech_timeout="auto",
-                profanity_filter=True,
-                barge_in=True
-            )
+            g = Gather(**gather_kwargs({
+                "action": f"{base_url}/coupon_followup?job={job_id}",
+                "method": "POST",
+                "language": "es-US" if caller_lang.startswith("es") else "en-US",
+                "timeout": 10,  # Give more time for coupon responses
+                "speech_timeout": "auto",
+                "profanity_filter": True,
+                "barge_in": True
+            }))
             vr.append(g)
             print(f"[RESULT] TwiML(coupon follow-up gather)->\n{str(vr)}")
             return xml_response(vr)
@@ -4655,16 +4689,15 @@ def result():
 
             primary_lang = "es-US" if caller_lang.startswith("es") else "en-US"
 
-            g_primary = Gather(
-                input="speech",
-                action=f"{base_url}/confirm?job={job_id}",
-                method="POST",
-                language=primary_lang,
-                timeout=CONF_TIMEOUT,
-                speech_timeout="auto",
-                profanity_filter=True,
-                barge_in=True
-            )
+            g_primary = Gather(**gather_kwargs({
+                "action": f"{base_url}/confirm?job={job_id}",
+                "method": "POST",
+                "language": primary_lang,
+                "timeout": CONF_TIMEOUT,
+                "speech_timeout": "auto",
+                "profanity_filter": True,
+                "barge_in": True
+            }))
             g_primary.play(meta["confirm_url"])
 
             if round_num >= 2:
@@ -4677,16 +4710,15 @@ def result():
             if (not caller_lang.startswith("es")) and suspect_es:
                 confirm_es_line = f"{msg('confirm_prefix','es')} {heard_text_voice}?"
                 confirm_es_url = tts_line_url(confirm_es_line, None, base_url, job_id, "Confirm ES")
-                g_backup = Gather(
-                    input="speech",
-                    action=f"{base_url}/confirm?job={job_id}",
-                    method="POST",
-                    language="es-US",
-                    timeout=max(1, CONF_TIMEOUT),
-                    speech_timeout="auto",
-                    profanity_filter=True,
-                    barge_in=True
-                )
+                g_backup = Gather(**gather_kwargs({
+                    "action": f"{base_url}/confirm?job={job_id}",
+                    "method": "POST",
+                    "language": "es-US",
+                    "timeout": max(1, CONF_TIMEOUT),
+                    "speech_timeout": "auto",
+                    "profanity_filter": True,
+                    "barge_in": True
+                }))
                 g_backup.play(confirm_es_url)
                 if round_num >= 2:
                     yesno_es_url = tts_line_url(msg("yes_no","es"), None, base_url, job_id, "Yes No ES")
@@ -4702,16 +4734,15 @@ def result():
             vr.play(meta.get("response_url"))
             lang_code = "es-US" if meta.get("caller_lang","en").startswith("es") else "en-US"
             if USE_GATHER_MAIN:
-                g = Gather(
-                    input="speech",
-                    action=f"{base_url}/handle_gather",
-                    method="POST",
-                    language=lang_code,
-                    timeout=CONF_TIMEOUT,
-                    speech_timeout="auto",
-                    profanity_filter=True,
-                    barge_in=True
-                )
+                g = Gather(**gather_kwargs({
+                    "action": f"{base_url}/handle_gather",
+                    "method": "POST",
+                    "language": lang_code,
+                    "timeout": CONF_TIMEOUT,
+                    "speech_timeout": "auto",
+                    "profanity_filter": True,
+                    "barge_in": True
+                }))
                 vr.append(g)
             else:
                 vr.record(**record_args(f"{base_url}/handle", MAIN_MAXLEN, MAIN_TIMEOUT, beep_override=False))
@@ -4725,16 +4756,15 @@ def result():
             caller_lang = meta.get("caller_lang","en")
             # Play the response (which includes "anything else?"), then Gather the follow-up
             vr.play(meta["response_url"])
-            g = Gather(
-                input="speech",
-                action=f"{base_url}/followup_response?job={job_id}",
-                method="POST",
-                language="es-US" if caller_lang.startswith("es") else "en-US",
-                timeout=8,  # Give time for response
-                speech_timeout="auto",
-                profanity_filter=True,
-                barge_in=True
-            )
+            g = Gather(**gather_kwargs({
+                "action": f"{base_url}/followup_response?job={job_id}",
+                "method": "POST",
+                "language": "es-US" if caller_lang.startswith("es") else "en-US",
+                "timeout": 8,  # Give time for response
+                "speech_timeout": "auto",
+                "profanity_filter": True,
+                "barge_in": True
+            }))
             vr.append(g)
             print(f"[RESULT] TwiML(followup_ready gather)->\n{str(vr)}")
             return xml_response(vr)
@@ -4918,16 +4948,15 @@ def confirm():
             recording_url = request.form.get("RecordingUrl") or request.args.get("RecordingUrl")
             if not recording_url:
                 twiml_play_tts(vr, msg("err_confirm", caller_lang), "didnt_catch_confirm.mp3")
-                g = Gather(
-                    input="speech",
-                    action=f"{get_base_url()}/confirm?job={job_id}",
-                    method="POST",
-                    language="es-US" if caller_lang.startswith("es") else "en-US",
-                    timeout=max(1, CONF_TIMEOUT),
-                    speech_timeout="auto",
-                    profanity_filter=True,
-                    barge_in=True
-                )
+                g = Gather(**gather_kwargs({
+                    "action": f"{get_base_url()}/confirm?job={job_id}",
+                    "method": "POST",
+                    "language": "es-US" if caller_lang.startswith("es") else "en-US",
+                    "timeout": max(1, CONF_TIMEOUT),
+                    "speech_timeout": "auto",
+                    "profanity_filter": True,
+                    "barge_in": True
+                }))
                 # Repeat short prompt inside gather to allow interruption
                 prompt_line = msg("yes_no", caller_lang)
                 g.play(tts_line_url(prompt_line, "tts_cache/yes_or_no.mp3" if caller_lang=="en" else f"{CACHE_SUBDIR}/yes_no_{caller_lang}.mp3", get_base_url()))
@@ -4943,16 +4972,15 @@ def confirm():
             if not reply and not USE_LOCAL_WHISPER:
                 logger.warning("Local Whisper not available for confirm; falling back to Gather")
                 vr = VoiceResponse()
-                g = Gather(
-                    input="speech",
-                    action=f"{get_base_url()}/confirm?job={job_id}",
-                    method="POST",
-                    language="es-US" if caller_lang.startswith("es") else "en-US",
-                    timeout=max(1, CONF_TIMEOUT),
-                    speech_timeout="auto",
-                    profanity_filter=True,
-                    barge_in=True
-                )
+                g = Gather(**gather_kwargs({
+                    "action": f"{get_base_url()}/confirm?job={job_id}",
+                    "method": "POST",
+                    "language": "es-US" if caller_lang.startswith("es") else "en-US",
+                    "timeout": max(1, CONF_TIMEOUT),
+                    "speech_timeout": "auto",
+                    "profanity_filter": True,
+                    "barge_in": True
+                }))
                 prompt_line = msg("yes_no", caller_lang)
                 g.play(tts_line_url(prompt_line, "tts_cache/yes_or_no.mp3" if caller_lang=="en" else f"{CACHE_SUBDIR}/yes_no_{caller_lang}.mp3", get_base_url()))
                 vr.append(g)
@@ -5113,16 +5141,15 @@ def confirm():
                 twiml_play_tts(vr, msg("reask_cap", caller_lang), "tts_cache/reask_cap.mp3" if caller_lang=="en" else f"{CACHE_SUBDIR}/reask_cap_{caller_lang}.mp3")
                 # NEW: use Gather for fresh item if enabled
                 if USE_GATHER_MAIN:
-                    g = Gather(
-                        input="speech",
-                        action=f"{get_base_url()}/handle_gather",
-                        method="POST",
-                        language=_primary_lang_code(caller_lang),
-                        timeout=CONF_TIMEOUT,
-                        speech_timeout="auto",
-                        profanity_filter=True,
-                        barge_in=True
-                    )
+                    g = Gather(**gather_kwargs({
+                        "action": f"{get_base_url()}/handle_gather",
+                        "method": "POST",
+                        "language": _primary_lang_code(caller_lang),
+                        "timeout": CONF_TIMEOUT,
+                        "speech_timeout": "auto",
+                        "profanity_filter": True,
+                        "barge_in": True
+                    }))
                     vr.append(g)
                 else:
                     vr.record(**record_args(f"{get_base_url()}/handle", MAIN_MAXLEN, MAIN_TIMEOUT, beep_override=False))
@@ -5156,16 +5183,15 @@ def confirm():
 
         # unclear -> ask again (localized) with barge-in
         prompt_line = msg("yes_no", caller_lang)
-        g = Gather(
-            input="speech",
-            action=f"{get_base_url()}/confirm?job={job_id}",
-            method="POST",
-            language="es-US" if caller_lang.startswith("es") else "en-US",
-            timeout=max(1, CONF_TIMEOUT),
-            speech_timeout="auto",
-            profanity_filter=True,
-            barge_in=True
-        )
+        g = Gather(**gather_kwargs({
+            "action": f"{get_base_url()}/confirm?job={job_id}",
+            "method": "POST",
+            "language": "es-US" if caller_lang.startswith("es") else "en-US",
+            "timeout": max(1, CONF_TIMEOUT),
+            "speech_timeout": "auto",
+            "profanity_filter": True,
+            "barge_in": True
+        }))
         g.play(tts_line_url(prompt_line, "tts_cache/yes_or_no.mp3" if caller_lang=="en" else f"{CACHE_SUBDIR}/yes_no_{caller_lang}.mp3", get_base_url()))
         vr.append(g)
         print(f"[CONFIRM] TwiML(unclear + gather)->\n{str(vr)}")
@@ -5212,16 +5238,15 @@ def voice_post():
 
     if USE_GATHER_MAIN:
         # Correct route + correct locale code for Twilio
-        g = Gather(
-            input="speech",
-            action=f"{get_base_url()}/handle_gather?call_id={call_id}",
-            method="POST",
-            language=_primary_lang_code(DEFAULT_LANG),
-            timeout=max(4, CONF_TIMEOUT),
-            speech_timeout="auto",
-            profanity_filter=True,
-            barge_in=True
-        )
+        g = Gather(**gather_kwargs({
+            "action": f"{get_base_url()}/handle_gather?call_id={call_id}",
+            "method": "POST",
+            "language": _primary_lang_code(DEFAULT_LANG),
+            "timeout": max(4, CONF_TIMEOUT),
+            "speech_timeout": "auto",
+            "profanity_filter": True,
+            "barge_in": True
+        }))
         vr.append(g)
     else:
         # Record-first fallback (correct action path)
@@ -5331,16 +5356,15 @@ def dept_choice():
                 if not caller_lang.startswith("es") else
                 f"Por favor diga {', '.join(options[:-1])} o {options[-1]}."
             )
-            g = Gather(
-                input="speech",
-                action=f"{get_base_url()}/dept_choice?job={job_id}",
-                method="POST",
-                language="es-US" if caller_lang.startswith("es") else "en-US",
-                timeout=max(1, CONF_TIMEOUT),
-                speech_timeout="auto",
-                profanity_filter=True,
-                barge_in=True
-            )
+            g = Gather(**gather_kwargs({
+                "action": f"{get_base_url()}/dept_choice?job={job_id}",
+                "method": "POST",
+                "language": "es-US" if caller_lang.startswith("es") else "en-US",
+                "timeout": max(1, CONF_TIMEOUT),
+                "speech_timeout": "auto",
+                "profanity_filter": True,
+                "barge_in": True
+            }))
             # Replay the original dept prompt then the hint
             if meta.get("dept_prompt_url"):
                 g.play(meta["dept_prompt_url"])
@@ -6463,6 +6487,8 @@ if __name__ == "__main__":
             print(f"[ASR] Local Whisper: ENABLED but no implementation available")
     else:
         print(f"[ASR] Local Whisper: DISABLED (USE_LOCAL_WHISPER=0)")
+    
+    print(f"[GATHER] language={GATHER_LANGUAGE} enhanced={GATHER_ENHANCED} timeout={GATHER_TIMEOUT} speechTimeout={GATHER_SPEECH_TIMEOUT} hints={GATHER_HINTS}")
     
     print(f"Starting Flask on 0.0.0.0:{PORT}")
     log_effective_config()

@@ -1,0 +1,27 @@
+# --- core server dependencies ---
+flask
+gunicorn
+gevent
+python-dotenv==1.0.1
+
+# --- AI/ML dependencies ---
+openai
+numpy<2.0
+ctranslate2==4.5.0
+faster-whisper==1.0.3
+
+# --- HTTP/API dependencies ---
+requests
+twilio
+
+# --- WebSocket dependencies ---
+flask-sock
+simple-websocket
+gevent-websocket
+
+# --- development/testing ---
+pytest
+pyyaml
+uvicorngevent-websocket
+flask-sock
+simple-websocket
