@@ -725,6 +725,10 @@ GATHER_HINTS = os.getenv(
 GATHER_ENHANCED = os.getenv("GATHER_ENHANCED", "1") in ("1", "true", "True")
 GATHER_MAX_ATTEMPTS = int(os.getenv("GATHER_MAX_ATTEMPTS", "3"))
 
+# Twilio diagnostics
+DIAG_TWILIO = int(os.getenv("DIAG_TWILIO", "1"))  # default ON until we're done
+DIAG_LOG_BODY_LIMIT = int(os.getenv("DIAG_LOG_BODY_LIMIT", "4096"))
+
 def gather_kwargs(overrides: dict | None = None) -> dict:
     """Build consistent kwargs for Twilio <Gather> speech recognition."""
     base = {
@@ -1134,6 +1138,39 @@ def abs_url(path: str) -> str:
         return path.replace("http://", "https://", 1)
     base = PUBLIC_HTTP_BASE or (request.url_root if request else "")
     return urljoin(base, path).replace("http://", "https://", 1)
+
+def _log_twilio_request(label: str):
+    """Log comprehensive Twilio webhook request details for diagnostics"""
+    try:
+        from flask import request, current_app
+        hdrs = {k: v for k, v in request.headers.items()}
+        # Highlight useful Twilio headers
+        twilio_meta = {
+            "X-Twilio-Request-Id": hdrs.get("X-Twilio-Request-Id"),
+            "X-Twilio-Signature": hdrs.get("X-Twilio-Signature"),
+            "User-Agent": hdrs.get("User-Agent"),
+            "Content-Type": hdrs.get("Content-Type"),
+            "Host": hdrs.get("Host"),
+            "X-Forwarded-For": hdrs.get("X-Forwarded-For"),
+            "X-Forwarded-Proto": hdrs.get("X-Forwarded-Proto"),
+        }
+        # Raw body (limited)
+        raw = request.get_data(as_text=True) or ""
+        if len(raw) > DIAG_LOG_BODY_LIMIT:
+            raw = raw[:DIAG_LOG_BODY_LIMIT] + "...[truncated]"
+        # Parsed form/args
+        form = {k: request.form.get(k) for k in request.form.keys()}
+        args = {k: request.args.get(k) for k in request.args.keys()}
+        # Speech-specific fields
+        speech_result = (request.form.get("SpeechResult") or "").strip()
+        digits = (request.form.get("Digits") or "").strip()
+        current_app.logger.info(
+            "[TWILIO %s] headers=%s args=%s form=%s raw_len=%s SpeechResult_len=%s Digits=%s",
+            label, twilio_meta, args, {k: (v if k != "RecordingUrl" else "[redacted]") for k, v in form.items()},
+            len(raw), len(speech_result), digits
+        )
+    except Exception as e:
+        current_app.logger.exception("Failed to log Twilio request: %s", e)
 
 def static_file_url(relpath: str) -> str:
     base = get_base_url()
@@ -5253,12 +5290,64 @@ def confirm():
         print(f"[CONFIRM] TwiML(error)->\n{str(vr)}")
         return xml_response(vr)
 
+# Diagnostic routes for A/B testing Twilio Gather behavior
+if DIAG_TWILIO:
+    @app.route("/diag/voice", methods=["POST"])
+    def diag_voice():
+        """
+        Minimal, vendor-recommended Gather that Twilio should succeed with.
+        No greeting first, no nesting complexity.
+        """
+        from twilio.twiml.voice_response import VoiceResponse, Gather
+        vr = VoiceResponse()
+        g = Gather(
+            input="speech dtmf",
+            language=os.getenv("GATHER_LANGUAGE","en-US"),
+            method="POST",
+            action=abs_url(url_for("diag_handle")),
+            timeout=int(os.getenv("GATHER_TIMEOUT","7")),
+            speechTimeout=os.getenv("GATHER_SPEECH_TIMEOUT","auto"),
+            enhanced=True,
+            actionOnEmptyResult=True,
+            # phone_call model is best for PSTN; if Twilio account doesn't support it,
+            # remove speechModel line after test.
+            speechModel="phone_call"
+        )
+        # Short "I'm listening" tone if exists (non-blocking)
+        earcon = static_file_url("tts_cache/reprompt_listening.mp3")
+        g.play(earcon)
+        vr.append(g)
+        return xml_response(vr)
+
+    @app.route("/diag/handle", methods=["POST"])
+    def diag_handle():
+        _log_twilio_request("DIAG_HANDLE")
+        from twilio.twiml.voice_response import VoiceResponse
+        vr = VoiceResponse()
+        sr = (request.form.get("SpeechResult") or "").strip()
+        dg = (request.form.get("Digits") or "").strip()
+        if sr:
+            # Prove we received speech by echoing a short confirmation.
+            # Use Play static TTS cache if you prefer; Say is fine for diag.
+            vr.say(f"Received speech of length {len(sr)}. Thank you.")
+        elif dg:
+            vr.say(f"Received digits {dg}. Thank you.")
+        else:
+            vr.say("No speech or digits detected.")
+        return xml_response(vr)
+
+    @app.route("/debug/headers", methods=["GET","POST"])
+    def debug_headers():
+        _log_twilio_request("DEBUG_HEADERS")
+        return "ok", 200
+
 @app.route("/voice", methods=["GET"])
 def voice_get():
     return "POST /voice only (Twilio webhook)."
 
 @app.route("/voice", methods=["POST"])
 def voice_post():
+    _log_twilio_request("VOICE")
     # Generate unique call ID for credit tracking
     call_id = str(uuid.uuid4())
     
@@ -5306,6 +5395,7 @@ def voice_post():
 @app.route("/handle_gather", methods=["POST"])
 def handle_gather():
     """First utterance via Twilio Gather (speech). Fast and noise-safe."""
+    _log_twilio_request("HANDLE_GATHER")
     try:
         # Read parameters
         n = int(request.args.get("n", "1"))
