@@ -5245,7 +5245,12 @@ def debug_echo():
     # Echo what this server actually receives from Twilio (or curl)
     current_app.logger.info("[ECHO] headers=%s", dict(request.headers))
     current_app.logger.info("[ECHO] form=%s", dict(request.form))
-    return jsonify({"ok": True, "form": dict(request.form)}), 200
+    return jsonify({
+        "headers": dict(request.headers),
+        "form": dict(request.form),
+        "args": dict(request.args),
+        "method": request.method
+    }), 200
 
 @app.route("/voice", methods=["GET"])
 def voice_get():
