@@ -85,28 +85,38 @@ def _effective_base() -> str:
     return base
 
 def public_url(path_or_url: str) -> str:
-    """Return absolute https URL for Twilio. Never localhost/ngrok."""
-    s = (path_or_url or "").strip()
-    if not s:
-        return s
-    # If already absolute, sanitize scheme and block localhost.
-    if s.startswith("http://") or s.startswith("https://"):
-        s2 = s.replace("http://", "https://")
-        if "localhost" in s2 or "127.0.0.1" in s2:
-            base = _effective_base()
-            # Convert to path if it looks like our static/tts path
-            try:
-                from urllib.parse import urlparse
-                p = urlparse(s2)
-                if p.path:
-                    return urljoin(base + "/", p.path.lstrip("/"))
-            except Exception:
-                pass
-            return base or s2  # last resort
-        return s2
-    # Relative -> join to base
-    base = _effective_base()
-    return urljoin((base + "/") if base else "/", s.lstrip("/"))
+    if not path_or_url:
+        raise RuntimeError("public_url: empty path_or_url")
+    # Already absolute HTTPS
+    if isinstance(path_or_url, str) and path_or_url.startswith("https://"):
+        return path_or_url
+    base = os.getenv("PUBLIC_BASE", "").rstrip("/")
+    if base:
+        if path_or_url.startswith("/"):
+            return f"{base}{path_or_url}"
+        return f"{base}/{path_or_url}"
+    # Last resort (inside request): derive from request.url_root
+    try:
+        root = request.url_root.rstrip("/")
+        # force https for Twilio
+        root = root.replace("http://", "https://")
+        if path_or_url.startswith("/"):
+            return f"{root}{path_or_url}"
+        return f"{root}/{path_or_url}"
+    except Exception:
+        # This is the exact failure we've seen in logs ("No base URL available")
+        raise RuntimeError("No PUBLIC_BASE and no request context; cannot build public URL")
+
+def sanitize_twiml_xml(xml: str) -> str:
+    # make http -> https, and replace any localhost/127.* with PUBLIC_BASE
+    if not isinstance(xml, str):
+        return xml
+    xml = xml.replace("http://", "https://")
+    base = os.getenv("PUBLIC_BASE", "").rstrip("/")
+    if base:
+        xml = re.sub(r"https://(localhost|127\.0\.0\.1)(:\d+)?", base, xml)
+    return xml
+
 # --- END: hardened config defaults ---
 
 # ===== FLASK APP CREATION =====
@@ -1165,20 +1175,16 @@ def _get_whisper_impl():
 
 # Global error handlers for Twilio webhooks (fix 12300)
 @app.errorhandler(404)
-def _404(_):
-    hold_url = public_url("static/tts_cache/holdy_tiny.mp3")
-    return xml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Play>{hold_url}</Play>
-</Response>""", 200)
+def _e404(e):
+    tw = VoiceResponse()
+    tw.play(public_url("/static/tts_cache/holdy_tiny.mp3"))
+    return xml_response(tw)
 
 @app.errorhandler(500)
-def _500(_):
-    hold_url = public_url("static/tts_cache/holdy_tiny.mp3")
-    return xml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Play>{hold_url}</Play>
-</Response>""", 200)
+def _e500(e):
+    tw = VoiceResponse()
+    tw.play(public_url("/static/tts_cache/holdy_tiny.mp3"))
+    return xml_response(tw)
 
 @app.after_request
 def _force_twiml_xml(resp):
@@ -1357,11 +1363,10 @@ def clear_state(job_id: str):
     _fb_del(key)
 
 def static_file_url(relpath: str) -> str:
-    base = get_base_url()
     rel = (relpath or "").lstrip("/")
     if rel.startswith("static/"):
         rel = rel[len("static/"):]
-    return f"{base}/static/{rel}"
+    return public_url(f"/static/{rel}")
 
 # --- Twilio XML helper (always text/xml) ---
 from flask import make_response
@@ -1371,19 +1376,17 @@ try:
 except Exception:
     VoiceResponse = None  # optional import
 
-def xml_response(twiml_obj_or_text, status: int = 200):
-    twiml_text = str(twiml_obj_or_text) if VoiceResponse and isinstance(twiml_obj_or_text, VoiceResponse) else twiml_obj_or_text
-    if not isinstance(twiml_text, str):
-        twiml_text = str(twiml_text)
-    
-    # Final sanitize step BEFORE returning
-    base = _effective_base()
-    if base:
-        twiml_text = twiml_text.replace("http://", "https://")
-        twiml_text = twiml_text.replace("https://localhost:5000", base).replace("http://localhost:5000", base)
-        twiml_text = twiml_text.replace("https://127.0.0.1:5000", base).replace("http://127.0.0.1:5000", base)
-    
-    return Response(twiml_text, status=status, mimetype="text/xml; charset=utf-8")
+def xml_response(x):
+    """Return TwiML with correct content-type. Accepts str or VoiceResponse."""
+    if isinstance(x, VoiceResponse):
+        body = str(x)
+    else:
+        body = str(x)
+    body = sanitize_twiml_xml(body)
+    from flask import make_response
+    resp = make_response(body, 200)
+    resp.headers["Content-Type"] = "text/xml; charset=utf-8"
+    return resp
 
 CACHE_SUBDIR = "tts_cache"
 
@@ -4617,7 +4620,7 @@ def coupon_followup():
             vr.play(HOLDY_CLARIFY_CDN)
             import urllib.parse
             encoded_input = urllib.parse.quote(input_text)
-            vr.redirect(f"{base_url}/coupon_process?job={job_id}&input={encoded_input}")
+            vr.redirect(public_url(f"/coupon_process?job={job_id}&input={encoded_input}"))
             print(f"[COUPON] TwiML(immediate hold)->\n{str(vr)}")
             return xml_response(vr)
     except Exception as e:
@@ -4654,11 +4657,10 @@ def coupon_process():
 	try:
 		vr = VoiceResponse()
 		job_id = request.args.get("job") or request.form.get("job")
-		base = get_base_url()
 		if job_id:
-			vr.redirect(f"{base}/sms_consent?job={job_id}", method="POST")
+			vr.redirect(public_url(f"/sms_consent?job={job_id}"), method="POST")
 		else:
-			vr.redirect(f"{base}/sms_consent", method="POST")
+			vr.redirect(public_url("/sms_consent"), method="POST")
 		return xml_response(vr)
 	except Exception:
 		vr = VoiceResponse()
@@ -4720,7 +4722,7 @@ def coupon_replay():
 def _result_poll_url(base_url: str, job_id: str, meta: dict) -> str:
     cnt = meta.get("polls", 0) + 1
     meta["polls"] = cnt
-    return abs_url(f"/result?job={job_id}&n={cnt}&t={int(time.time()*1000)}")
+    return public_url(f"/result?job={job_id}&n={cnt}&t={int(time.time()*1000)}")
 
 @app.post("/result")
 def result():
@@ -5261,27 +5263,19 @@ def voice_post():
     greet_url = cached if cached else tts_line_url(greet_text, None, get_base_url())
     print(f"[VOICE] greet_url -> {greet_url} (lang={DEFAULT_LANG}, gather_main={USE_GATHER_MAIN})")
 
-    vr = VoiceResponse()
-
-    if USE_GATHER_MAIN:
-        # Correct route + correct locale code for Twilio
-        kwargs = gather_kwargs()
-        kwargs.update({
-            "action": abs_url(url_for("handle_gather", call_id=call_id, t0=int(time.time()))),
-            "language": _primary_lang_code(DEFAULT_LANG),
-            "timeout": max(4, CONF_TIMEOUT),
-        })
-        g = Gather(**kwargs)
-        g.play(abs_url(greet_url))
-        vr.append(g)
-    else:
-        # Record-first fallback (correct action path)
-        vr.record(**record_args(abs_url(url_for("handle")), MAIN_MAXLEN, MAIN_TIMEOUT, beep_override=False))
-
-    resp = xml_response(vr)
-    if DIAG_TWILIO == 1:
-        app.logger.info(f"[VOICE] Final TwiML: {str(vr)}")
-    return resp
+    tw = VoiceResponse()
+    tw.play(public_url(greet_url))  # your greeting url builder already logs this
+    g = tw.gather(
+        action=public_url("/handle_gather"),
+        method="POST",
+        input="speech dtmf",
+        speech_model="phone_call",
+        speech_timeout="3",
+        barge_in=True,
+        profanity_filter=False,
+        action_on_empty_result=True
+    )
+    return xml_response(tw)
 
 # ===== NEW: first utterance Gather handler =====
 def build_confirmation_audio_url(text: str) -> str:
@@ -5309,78 +5303,65 @@ def start_async_processing(job_id: str, text: str):
             update_state(job_id, {"ready": True, "play_url": fallback})
     threading.Thread(target=_work, daemon=True).start()
 
+def save_state_and_start_async_process(speech: str, digits: str) -> str:
+    """Save state and start async processing, return job_id"""
+    import uuid, time
+    job_id = str(uuid.uuid4())
+    now_ms = int(time.time() * 1000)
+    
+    # initialize state
+    state = {
+        "job_id": job_id,
+        "phase": "first_hold",
+        "ready": False,
+        "call_sid": request.values.get("CallSid", ""),
+        "heard": speech or digits,
+        "created_ms": now_ms,
+    }
+    save_state(job_id, state)
+    
+    # start async processing
+    start_async_processing(job_id, speech or digits)
+    
+    return job_id
+
 @app.post("/handle_gather")
 def handle_gather():
-    _log_twilio_request("HANDLE_GATHER")
-    
-    # Read params safely
-    speech = (request.values.get("SpeechResult") or "").strip()
-    digits = (request.values.get("Digits") or "").strip()
-    conf = request.values.get("Confidence")
-    
-    # Log when DIAG_TWILIO==1
-    if DIAG_TWILIO == 1:
-        app.logger.info("[GATHER] speech=%r conf=%r digits=%r job=%s", speech, conf, digits, "pending")
-    
-    # Consider it **input present** if speech OR digits is non-empty. 
-    # Ignore confidence unless conf is present AND float(conf) < 0.20 (extremely low).
-    has_input = bool(speech or digits)
-    if conf is not None and float(conf) < 0.20:
-        has_input = False
-    
-    if has_input:
-        # Input is present: proceed with existing async/job flow
-        import uuid, time
-        job_id = str(uuid.uuid4())
-        now_ms = int(time.time() * 1000)
-        
-        # initialize state
-        state = {
-            "job_id": job_id,
-            "phase": "first_hold",
-            "ready": False,
-            "call_sid": request.values.get("CallSid", ""),
-            "heard": speech or digits,
-            "created_ms": now_ms,
-        }
-        save_state(job_id, state)
-        
-        # start async processing
-        start_async_processing(job_id, speech or digits)
-        
-        # redirect to /result poller (absolute URL!)
-        next_url = public_url(f"/result?job={job_id}&n={int(time.time())}")
-        resp = f'<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">{next_url}</Redirect></Response>'
-        app.logger.info(f"[HANDLE_GATHER] Final TwiML: {resp}")
-        return xml_response(resp)
-    else:
-        # No input: DO NOT Hangup. Re-prompt with a shorter message and another <Gather>
-        # Track attempts via job state to limit to 2 tries, then final apology + Hangup
-        retry_count = int(request.values.get("retry_count", "0"))
-        if retry_count >= 2:
-            # Too many retries, end call gracefully
-            bye_url = public_url("static/tts_cache/no_recording.mp3")
-            resp = f'<?xml version="1.0" encoding="UTF-8"?><Response><Play>{bye_url}</Play><Hangup/></Response>'
-            app.logger.info(f"[HANDLE_GATHER] Final TwiML: {resp}")
-            return xml_response(resp)
-        
-        # Re-prompt with shorter message and another Gather
-        reprompt_url = public_url("static/tts_cache/reprompt_listening.mp3")
-        gather_action = public_url(f"/handle_gather?retry_count={retry_count + 1}")
-        
-        # Use existing gather_kwargs() for consistent parameters
-        gather_params = gather_kwargs()
-        gather_params["action"] = gather_action
-        
-        # Build Gather XML
-        gather_xml = "<Gather"
-        for key, value in gather_params.items():
-            gather_xml += f' {key}="{value}"'
-        gather_xml += f"><Play>{reprompt_url}</Play></Gather>"
-        
-        resp = f'<?xml version="1.0" encoding="UTF-8"?><Response>{gather_xml}</Response>'
-        app.logger.info(f"[HANDLE_GATHER] Final TwiML: {resp}")
-        return xml_response(resp)
+    form = request.form or {}
+    speech = (form.get("SpeechResult") or "").strip()
+    digits = (form.get("Digits") or "").strip()
+    conf_raw = form.get("Confidence")
+    try:
+        conf = float(conf_raw) if conf_raw is not None else 0.0
+    except Exception:
+        conf = 0.0
+
+    if DIAG_TWILIO:
+        current_app.logger.info("[GATHER] keys=%s speech=%r digits=%r conf=%.3f",
+                                list(form.keys()), speech, digits, conf)
+
+    # If Twilio sent anything at all, treat as input
+    if speech or digits:
+        # TODO: your job dispatch/state save here -> returns job_id
+        job_id = save_state_and_start_async_process(speech, digits)  # <--- use your helper
+        tw = VoiceResponse()
+        tw.redirect(public_url(f"/result?job={job_id}"), method="POST")
+        return xml_response(tw)
+
+    # No input: re-prompt, DO NOT hang up
+    tw = VoiceResponse()
+    tw.play(public_url("/static/tts_cache/reprompt_listening.mp3"))
+    tw.gather(
+        action=public_url("/handle_gather"),
+        method="POST",
+        input="speech dtmf",
+        speech_model="phone_call",
+        speech_timeout="3",
+        barge_in=True,
+        profanity_filter=False,
+        action_on_empty_result=True
+    )
+    return xml_response(tw)
     
 @app.route("/dept_choice", methods=["POST"])
 def dept_choice():
