@@ -56,6 +56,9 @@ USE_GATHER_MAIN = os.getenv("USE_GATHER_MAIN", "1") == "1"
 DIAG_TWILIO         = int(os.getenv("DIAG_TWILIO", "0") or 0)
 DIAG_LOG_BODY_LIMIT = int(os.getenv("DIAG_LOG_BODY_LIMIT", "4000") or 4000)
 
+# --- Build fingerprint (for deploy verification) ---
+BUILD_ID = os.getenv("BUILD_ID", time.strftime("%Y%m%d-%H%M%S"))
+
 # Public base used to build absolute URLs that Twilio can fetch.
 # Example: https://ai-call-router-production.up.railway.app
 PUBLIC_WS_BASE = os.getenv("PUBLIC_WS_BASE", "").rstrip("/")
@@ -121,6 +124,9 @@ def sanitize_twiml_xml(xml: str) -> str:
 
 # ===== FLASK APP CREATION =====
 app = Flask(__name__, static_folder="static")
+
+# Log the build ID at boot so we can confirm the running version via logs
+app.logger.info("[BUILD] %s", BUILD_ID)
 
 # Configure ProxyFix for Railway deployment
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -5232,7 +5238,14 @@ def healthz():
 
 @app.get("/whoami")
 def whoami():
-    return f"Loaded from app.py, DIAG_TWILIO={DIAG_TWILIO}", 200
+    return f"Loaded from app.py, DIAG_TWILIO={DIAG_TWILIO}, BUILD={BUILD_ID}", 200
+
+@app.post("/debug_echo")
+def debug_echo():
+    # Echo what this server actually receives from Twilio (or curl)
+    current_app.logger.info("[ECHO] headers=%s", dict(request.headers))
+    current_app.logger.info("[ECHO] form=%s", dict(request.form))
+    return jsonify({"ok": True, "form": dict(request.form)}), 200
 
 @app.route("/voice", methods=["GET"])
 def voice_get():
@@ -5327,6 +5340,10 @@ def save_state_and_start_async_process(speech: str, digits: str) -> str:
 
 @app.post("/handle_gather")
 def handle_gather():
+    current_app.logger.info(
+        "[GATHER] form_keys=%s raw_form=%r content_type=%s",
+        list(request.form.keys()), dict(request.form), request.content_type
+    )
     form = request.form or {}
     speech = (form.get("SpeechResult") or "").strip()
     digits = (form.get("Digits") or "").strip()
