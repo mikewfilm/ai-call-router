@@ -1,20 +1,19 @@
+# wsgi.py
 import logging
-import os
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("wsgi")
 
-FALLBACK_TO_MAIN = int(os.getenv("FALLBACK_TO_MAIN", "0"))
+# Try to import the Flask app object named `app` from app.py.
+# If that fails, log and try main.py as a last resort.
 try:
-    from app import app as application
+    from app import app as app  # must export a module-level name `app`
     logger.info("✅ Loaded app from app.py")
-except Exception as e:
-    logger.error("Failed to import app.py: %s", e)
-    import traceback
-    logger.error("Traceback: %s", traceback.format_exc())
-    if FALLBACK_TO_MAIN:
-        logger.warning("FALLBACK_TO_MAIN=1, falling back to main.py")
-        from main import app as application
+except Exception as e_app:
+    logger.warning("⚠️ Failed loading app from app.py (%s); trying main.py", e_app)
+    try:
+        from main import app as app  # also module-level `app`
         logger.info("✅ Loaded app from main.py (fallback)")
-    else:
-        logger.error("FALLBACK_TO_MAIN=0, raising exception")
+    except Exception as e_main:
+        logger.exception("❌ Could not load Flask app from app.py or main.py")
         raise
+
+# Gunicorn will look for `app` in this module (wsgi:app)
