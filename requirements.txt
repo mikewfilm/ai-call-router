@@ -1,6 +1,6 @@
 # --- core server dependencies ---
 flask
-gunicorn
+gunicorn>=20
 gevent
 python-dotenv==1.0.1
 
@@ -27,6 +27,8 @@ flask-sock
 simple-websocket
 
 beautifulsoup4
+
+aiohttp
 
 wikipedia
 
