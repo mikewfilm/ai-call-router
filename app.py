@@ -28,9 +28,33 @@ import traceback
 import asyncio
 import aiohttp
 
+# ===== CONFIG ORDER + DEFAULTS =====
+# All config flags and constants with safe defaults - defined before ANY route definitions
+DIAG_TWILIO = int(os.getenv("DIAG_TWILIO", "0"))
+GATHER_TIMEOUT = int(os.getenv("GATHER_TIMEOUT", "5"))
+GATHER_MAX_ATTEMPTS = int(os.getenv("GATHER_MAX_ATTEMPTS", "3"))
+GATHER_MAX_SECONDS = int(os.getenv("GATHER_MAX_SECONDS", "45"))
+GATHER_HINTS = os.getenv("GATHER_HINTS", "bananas, pharmacy, prescriptions, coupons, produce, deli, bakery, customer service")
+REDIS_URL = os.getenv("REDIS_URL", "")
+USE_LOCAL_WHISPER = int(os.getenv("USE_LOCAL_WHISPER", "0"))
+GATHER_SPEECH_SECONDS = int(os.getenv("GATHER_SPEECH_SECONDS", "7"))
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
+USE_FILLER = os.getenv("USE_FILLER", "1") == "1"
+HOLDY_TINY_CDN = os.getenv("HOLDY_TINY_CDN", "https://call-router-audio-2526.twil.io/holdy_tiny.mp3")
+HOLDY_MID_CDN = os.getenv("HOLDY_MID_CDN", "https://call-router-audio-2526.twil.io/holdy_mid.mp3")
+HOLD_BG_CDN = os.getenv("HOLD_BG_CDN", "")
+HOLDY_CLARIFY_CDN = os.getenv("HOLDY_CLARIFY_CDN", "")
+CALL_TIMEOUT_SECONDS = int(os.getenv("CALL_TIMEOUT_SECONDS", "300"))
+POLL_PAUSE = int(os.getenv("POLL_PAUSE", "2"))
+HOLD_MIN_GAP_SEC = int(os.getenv("HOLD_MIN_GAP_SEC", "8"))
+DEFAULT_LANG = os.getenv("DEFAULT_LANG", "en")
+CONF_TIMEOUT = int(os.getenv("CONF_TIMEOUT", "5"))
+MAIN_MAXLEN = int(os.getenv("MAIN_MAXLEN", "30"))
+MAIN_TIMEOUT = int(os.getenv("MAIN_TIMEOUT", "10"))
+USE_GATHER_MAIN = os.getenv("USE_GATHER_MAIN", "1") == "1"
+
 # Optional Whisper imports - only load if explicitly enabled
 logger = logging.getLogger(__name__)
-USE_LOCAL_WHISPER = os.getenv("USE_LOCAL_WHISPER", "0") == "1"
 FasterWhisper = None
 WhisperLegacy = None
 if USE_LOCAL_WHISPER:
@@ -712,13 +736,9 @@ CORRECTION_HOPS_MAX = clamp_int(safe_int_env("CORRECTION_HOPS_MAX", 2), 1, 5, "C
 
 # --- ASR / Twilio Gather tuning (configurable via env) ---
 GATHER_LANGUAGE = os.getenv("GATHER_LANGUAGE", "en-US")
-# Overall silence timeout (seconds) before Gather ends; for speech we also set speechTimeout.
-GATHER_TIMEOUT = int(os.getenv("GATHER_TIMEOUT", "5"))
-GATHER_SPEECH_SECONDS = int(os.getenv("GATHER_SPEECH_SECONDS", "7"))
-GATHER_HINTS = os.getenv("GATHER_HINTS", "bananas, pharmacy, prescriptions, coupons, produce, deli, bakery, customer service")
 
-def gather_kwargs():
-    return dict(
+def gather_kwargs(**overrides):
+    base = dict(
         input="speech",
         language="en-US",
         method="POST",
@@ -726,11 +746,13 @@ def gather_kwargs():
         actionOnEmptyResult=True,
         profanityFilter=True,
         bargeIn=True,
-        timeout=GATHER_TIMEOUT,                      # numeric
-        speechTimeout=str(GATHER_SPEECH_SECONDS),    # numeric string (NOT "auto")
-        speechModel="phone_call",                    # critical for 13335
+        timeout=GATHER_TIMEOUT,
+        speechTimeout=str(max(GATHER_TIMEOUT, 7)),
+        speechModel="phone_call",
         hints=GATHER_HINTS,
     )
+    base.update(overrides)
+    return base
 
 def log_effective_config():
     print("[CONFIG] PUBLIC_BASE_URL =", PUBLIC_BASE_URL or "(auto from request.url_root)")
@@ -1182,9 +1204,9 @@ _fallback_state = {}  # key -> (expires_ts, json_str)
 
 def get_redis():
     global _redis
-    if _redis is not None:
+    if '_redis' in globals() and _redis is not None:
         return _redis
-    url = os.getenv("REDIS_URL")
+    url = REDIS_URL
     if not url:
         _redis = None
         return None
@@ -1246,8 +1268,12 @@ def static_file_url(relpath: str) -> str:
 
 # --- Twilio XML helper (always text/xml) ---
 from flask import make_response
-def xml_response(xml_text: str, status: int = 200):
-    resp = make_response(xml_text, status)
+def xml_response(vr, status: int = 200):
+    if hasattr(vr, '__str__'):
+        twiml = str(vr)
+    else:
+        twiml = vr
+    resp = make_response(twiml, status)
     resp.headers["Content-Type"] = "text/xml; charset=utf-8"
     return resp
 
@@ -5080,6 +5106,14 @@ if DIAG_TWILIO:
     def debug_headers():
         _log_twilio_request("DEBUG_HEADERS")
         return "ok", 200
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True, "app": "app.py", "diag": DIAG_TWILIO}, 200
+
+@app.get("/whoami")
+def whoami():
+    return f"Loaded from app.py, DIAG_TWILIO={DIAG_TWILIO}", 200
 
 @app.route("/voice", methods=["GET"])
 def voice_get():

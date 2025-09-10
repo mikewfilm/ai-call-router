@@ -399,12 +399,17 @@ def startup_check():
     from flask import jsonify
     return jsonify(status="ok", checks=checks)
 
-@app.post("/voice")
-def voice():
-    vr = VoiceResponse()
-    vr.say("Thanks for calling Awesome Grocery. This is our test webhook. Goodbye.", voice="alice")
-    vr.hangup()
-    return Response(str(vr), mimetype="text/xml")
+@app.get("/whoami")
+def whoami_main():
+    return "Loaded from main.py", 200
+
+if os.getenv("ALLOW_MAIN_WEBHOOKS") == "1":
+    @app.post("/voice")
+    def voice():
+        vr = VoiceResponse()
+        vr.say("Thanks for calling Awesome Grocery. This is our test webhook. Goodbye.", voice="alice")
+        vr.hangup()
+        return Response(str(vr), mimetype="text/xml")
 
 @app.route("/voice_advanced", methods=["POST"])
 def voice_advanced():
