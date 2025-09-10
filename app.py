@@ -55,7 +55,7 @@ USE_GATHER_MAIN = os.getenv("USE_GATHER_MAIN", "1") == "1"
 
 # --- BEGIN: hardened config defaults ---
 DIAG_TWILIO         = int(os.getenv("DIAG_TWILIO", "0"))
-DIAG_LOG_BODY_LIMIT = int(os.getenv("DIAG_LOG_BODY_LIMIT", "4000"))
+DIAG_LOG_BODY_LIMIT = int(os.getenv("DIAG_LOG_BODY_LIMIT", "2000"))
 
 # Public base used to build absolute URLs that Twilio can fetch.
 # Example: https://ai-call-router-production.up.railway.app
@@ -1170,13 +1170,36 @@ def abs_url(path: str) -> str:
     base = PUBLIC_HTTP_BASE or (request.url_root if request else "")
     return urljoin(base, path).replace("http://", "https://", 1)
 
-def _log_twilio_request(raw: str, where: str):
+def _log_twilio_request(where: str, req=None):
     try:
-        limit = DIAG_LOG_BODY_LIMIT if "DIAG_LOG_BODY_LIMIT" in globals() else 4000
-        snippet = raw if (raw is None or len(raw) <= limit) else raw[:limit] + "…(truncated)"
-        app.logger.info("[TWILIO %s] %s", where, snippet)
+        if DIAG_TWILIO != 1:
+            return
+        
+        from flask import request
+        r = req or request
+        
+        # Get headers, args, form safely
+        headers = dict(r.headers) if hasattr(r, 'headers') else {}
+        args = r.args.to_dict(flat=True) if hasattr(r, 'args') and r.args else {}
+        form = r.form.to_dict(flat=True) if hasattr(r, 'form') and r.form else {}
+        
+        # Get raw body safely
+        try:
+            raw = r.get_data(as_text=True) or ""
+        except:
+            raw = ""
+        
+        if not raw and form:
+            from urllib.parse import urlencode
+            raw = urlencode(form)
+        
+        raw_len = len(raw) if raw else 0
+        
+        app.logger.info("[TWILIO %s] headers=%s args=%s form=%s raw_len=%s", 
+                       where, headers, args, form, raw_len)
+        
     except Exception as e:
-        app.logger.error("Failed to log Twilio request: %s", e)
+        app.logger.error("[TWILIO %s] log-failed: %s", where, e)
 
 def external_base() -> str:
     if PUBLIC_WS_BASE:
@@ -4620,6 +4643,7 @@ def _result_poll_url(base_url: str, job_id: str, meta: dict) -> str:
 
 @app.post("/result")
 def result():
+    _log_twilio_request("RESULT")
     from urllib.parse import urlencode
     args = request.args or {}
     job = (args.get("job") or "").strip()
@@ -5197,6 +5221,7 @@ def start_async_processing(job_id: str, text: str):
 
 @app.post("/handle_gather")
 def handle_gather():
+    _log_twilio_request("HANDLE_GATHER")
     # read inputs
     form = request.form or {}
     call_sid = form.get("CallSid", "")
@@ -5210,7 +5235,7 @@ def handle_gather():
     # initialize state
     state = {
         "job_id": job_id,
-        "phase": "first_hold",
+            "phase": "first_hold",
         "ready": False,
         "call_sid": call_sid,
         "heard": speech,
