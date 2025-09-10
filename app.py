@@ -60,6 +60,7 @@ DIAG_LOG_BODY_LIMIT = int(os.getenv("DIAG_LOG_BODY_LIMIT", "2000"))
 # Public base used to build absolute URLs that Twilio can fetch.
 # Example: https://ai-call-router-production.up.railway.app
 PUBLIC_WS_BASE = os.getenv("PUBLIC_WS_BASE", "").rstrip("/")
+PUBLIC_BASE = os.getenv("PUBLIC_BASE", "").strip()
 # --- END: hardened config defaults ---
 
 # ===== FLASK APP CREATION =====
@@ -1220,7 +1221,32 @@ def build_confirmation_audio_url(filename_or_path: str) -> str:
     path = filename_or_path
     if not path.startswith("/static/"):
         path = f"/static/tts_cache/{path}"
-    return absolute(path)
+    return public_url(path)
+
+from urllib.parse import urljoin
+def public_url(path: str) -> str:
+    """
+    Build an absolute HTTPS URL reachable by Twilio.
+    Priority:
+      1) PUBLIC_BASE env if set (e.g. https://ai-call-router-production.up.railway.app)
+      2) If inside a request, use request.url_root (force https)
+    """
+    try:
+        base = PUBLIC_BASE or (request.url_root if has_request_context() else "")
+    except Exception:
+        base = PUBLIC_BASE
+    if not base:
+        # final fallback: don't invent localhost; use a relative path and let caller handle it
+        return "/" + path.lstrip("/")
+    
+    # Defensive log when PUBLIC_BASE is empty and we fall back to request.url_root
+    if not PUBLIC_BASE and has_request_context():
+        app.logger.info("PUBLIC_BASE not set, using request.url_root for public_url")
+
+    base = base.strip().rstrip("/")
+    # force https
+    base = base.replace("http://", "https://")
+    return urljoin(base + "/", path.lstrip("/"))
 
 # --- Redis-backed job state with in-proc fallback ---
 import os, json, time
@@ -4658,12 +4684,12 @@ def result():
     if not ready:
         # Limit polls (e.g., 30 tries ~ 30 * hold clip length)
         if n > 30:
-            bye = absolute("/static/tts_cache/no_recording.mp3")
+            bye = public_url("static/tts_cache/no_recording.mp3")
             return xml_response(f'<?xml version="1.0" encoding="UTF-8"?><Response><Play>{bye}</Play><Hangup/></Response>')
 
-        hold_url = absolute("/static/tts_cache/holdy_tiny.mp3")  # ensure this exists
+        hold_url = public_url("static/tts_cache/holdy_tiny.mp3")  # ensure this exists
         next_qs = urlencode({"job": job, "n": n, "t": t})
-        next_url = absolute(f"/result?{next_qs}")
+        next_url = public_url(f"/result?{next_qs}")
         return xml_response(
             f'<?xml version="1.0" encoding="UTF-8"?><Response>'
             f'<Play>{hold_url}</Play>'
@@ -4673,11 +4699,11 @@ def result():
 
     # Ready: play confirmation audio and re-gather
     confirm_url = st.get("confirm_url", "")
-    prompt_url  = absolute(confirm_url) if confirm_url else absolute("/static/tts_cache/no_recording.mp3")
+    prompt_url  = public_url(confirm_url) if confirm_url else public_url("static/tts_cache/no_recording.mp3")
 
     # Build the next gather (use your standard defaults helper if you have one)
     # Make sure speechModel="phone_call" and numeric speechTimeout
-    gather_action = absolute(f"/confirm?job={job}")
+    gather_action = public_url(f"/confirm?job={job}")
     gather = (
         f'<Gather input="speech" language="en-US" method="POST" '
         f'speechModel="phone_call" speechTimeout="7" timeout="5" '
@@ -5205,7 +5231,7 @@ def build_confirmation_audio_url(text: str) -> str:
         return tts_line_url(text, None, get_base_url())
     except Exception:
         # Ultimate fallback
-        return url_for("static", filename="tts_cache/no_recording.mp3", _external=True)
+        return public_url("static/tts_cache/no_recording.mp3")
 
 def start_async_processing(job_id: str, text: str):
     def _work():
@@ -5215,40 +5241,76 @@ def start_async_processing(job_id: str, text: str):
             update_state(job_id, {"ready": True, "play_url": final_url})
         except Exception:
             # extreme fallback: safe mp3 that exists
-            fallback = url_for("static", filename="tts_cache/no_recording.mp3", _external=True)
+            fallback = public_url("static/tts_cache/no_recording.mp3")
             update_state(job_id, {"ready": True, "play_url": fallback})
     threading.Thread(target=_work, daemon=True).start()
 
 @app.post("/handle_gather")
 def handle_gather():
     _log_twilio_request("HANDLE_GATHER")
-    # read inputs
-    form = request.form or {}
-    call_sid = form.get("CallSid", "")
-    speech = (form.get("SpeechResult") or "").strip()
-
-    # create a job id (use your existing generator if present)
-    import uuid, time
-    job_id = str(uuid.uuid4())
-    now_ms = int(time.time() * 1000)
-
-    # initialize state
-    state = {
-        "job_id": job_id,
+    
+    # Extract inputs robustly
+    speech = request.values.get("SpeechResult", "").strip()
+    conf   = request.values.get("Confidence")
+    digits = request.values.get("Digits", "").strip()
+    
+    # Log when DIAG_TWILIO==1
+    if DIAG_TWILIO == 1:
+        app.logger.info("[GATHER] speech=%r conf=%r digits=%r", speech, conf, digits)
+    
+    # Consider input present if speech or digits is non-empty
+    # Do NOT gate on confidence unless it's present AND < 0.4
+    has_input = bool(speech or digits)
+    if conf is not None and float(conf) < 0.4:
+        has_input = False
+    
+    if has_input:
+        # Input is present: proceed with existing async/job flow
+        import uuid, time
+        job_id = str(uuid.uuid4())
+        now_ms = int(time.time() * 1000)
+        
+        # initialize state
+        state = {
+            "job_id": job_id,
             "phase": "first_hold",
-        "ready": False,
-        "call_sid": call_sid,
-        "heard": speech,
-        "created_ms": now_ms,
-    }
-    save_state(job_id, state)
-
-    # start async processing (use your existing queue/thread/task util if present)
-    start_async_processing(job_id, speech)  # implement or call your existing function
-
-    # immediately redirect Twilio to /result poller (absolute URL!)
-    next_url = absolute(f"/result?job={job_id}&n=1&t={now_ms}")
-    return xml_response(f'<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">{next_url}</Redirect></Response>')
+            "ready": False,
+            "call_sid": request.values.get("CallSid", ""),
+            "heard": speech or digits,
+            "created_ms": now_ms,
+        }
+        save_state(job_id, state)
+        
+        # start async processing
+        start_async_processing(job_id, speech or digits)
+        
+        # redirect to /result poller (absolute URL!)
+        next_url = public_url(f"/result?job={job_id}&n=1&t={now_ms}")
+        return xml_response(f'<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">{next_url}</Redirect></Response>')
+    else:
+        # Input is empty: re-prompt with greeting and another Gather
+        # Check retry count to avoid loops
+        retry_count = int(request.values.get("retry_count", "0"))
+        if retry_count >= 2:
+            # Too many retries, end call gracefully
+            bye_url = public_url("static/tts_cache/no_recording.mp3")
+            return xml_response(f'<?xml version="1.0" encoding="UTF-8"?><Response><Play>{bye_url}</Play><Hangup/></Response>')
+        
+        # Re-prompt with shorter message and another Gather
+        reprompt_url = public_url("static/tts_cache/reprompt_listening.mp3")
+        gather_action = public_url(f"/handle_gather?retry_count={retry_count + 1}")
+        
+        # Use existing gather_kwargs() for consistent parameters
+        gather_params = gather_kwargs()
+        gather_params["action"] = gather_action
+        
+        # Build Gather XML
+        gather_xml = "<Gather"
+        for key, value in gather_params.items():
+            gather_xml += f' {key}="{value}"'
+        gather_xml += f"><Play>{reprompt_url}</Play></Gather>"
+        
+        return xml_response(f'<?xml version="1.0" encoding="UTF-8"?><Response>{gather_xml}</Response>')
     
 @app.route("/dept_choice", methods=["POST"])
 def dept_choice():
