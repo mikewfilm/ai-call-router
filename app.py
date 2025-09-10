@@ -30,7 +30,6 @@ import aiohttp
 
 # ===== CONFIG ORDER + DEFAULTS =====
 # All config flags and constants with safe defaults - defined before ANY route definitions
-DIAG_TWILIO = int(os.getenv("DIAG_TWILIO", "0"))
 GATHER_TIMEOUT = int(os.getenv("GATHER_TIMEOUT", "5"))
 GATHER_MAX_ATTEMPTS = int(os.getenv("GATHER_MAX_ATTEMPTS", "3"))
 GATHER_MAX_SECONDS = int(os.getenv("GATHER_MAX_SECONDS", "45"))
@@ -54,8 +53,8 @@ MAIN_TIMEOUT = int(os.getenv("MAIN_TIMEOUT", "10"))
 USE_GATHER_MAIN = os.getenv("USE_GATHER_MAIN", "1") == "1"
 
 # --- BEGIN: hardened config defaults ---
-DIAG_TWILIO         = int(os.getenv("DIAG_TWILIO", "0"))
-DIAG_LOG_BODY_LIMIT = int(os.getenv("DIAG_LOG_BODY_LIMIT", "2000"))
+DIAG_TWILIO         = int(os.getenv("DIAG_TWILIO", "0") or 0)
+DIAG_LOG_BODY_LIMIT = int(os.getenv("DIAG_LOG_BODY_LIMIT", "4000") or 4000)
 
 # Public base used to build absolute URLs that Twilio can fetch.
 # Example: https://ai-call-router-production.up.railway.app
@@ -804,17 +803,14 @@ GATHER_LANGUAGE = os.getenv("GATHER_LANGUAGE", "en-US")
 
 def gather_kwargs(**overrides):
     base = dict(
-        input="speech",
+        input="speech dtmf",
         language="en-US",
-        method="POST",
-        enhanced=True,
-        actionOnEmptyResult=True,
-        profanityFilter=True,
-        bargeIn=True,
-        timeout=GATHER_TIMEOUT,
-        speechTimeout=str(max(GATHER_TIMEOUT, 7)),
         speechModel="phone_call",
-        hints=GATHER_HINTS,
+        speechTimeout=3,  # int seconds
+        profanityFilter="false",
+        bargeInOnSpeech="true",
+        actionOnEmptyResult=True,
+        method="POST"
     )
     base.update(overrides)
     return base
@@ -1170,16 +1166,18 @@ def _get_whisper_impl():
 # Global error handlers for Twilio webhooks (fix 12300)
 @app.errorhandler(404)
 def _404(_):
-    return xml_response("""<?xml version="1.0" encoding="UTF-8"?>
+    hold_url = public_url("static/tts_cache/holdy_tiny.mp3")
+    return xml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Play>https://call-router-audio-2526.twil.io/holdy_tiny.mp3</Play>
+  <Play>{hold_url}</Play>
 </Response>""", 200)
 
 @app.errorhandler(500)
 def _500(_):
-    return xml_response("""<?xml version="1.0" encoding="UTF-8"?>
+    hold_url = public_url("static/tts_cache/holdy_tiny.mp3")
+    return xml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Play>https://call-router-audio-2526.twil.io/holdy_tiny.mp3</Play>
+  <Play>{hold_url}</Play>
 </Response>""", 200)
 
 @app.after_request
@@ -1378,8 +1376,12 @@ def xml_response(twiml_obj_or_text, status: int = 200):
     if not isinstance(twiml_text, str):
         twiml_text = str(twiml_text)
     
-    # sanitize any accidental localhost urls
-    twiml_text = twiml_text.replace("http://", "https://").replace("https://localhost:5000", _effective_base()).replace("http://localhost:5000", _effective_base())
+    # Final sanitize step BEFORE returning
+    base = _effective_base()
+    if base:
+        twiml_text = twiml_text.replace("http://", "https://")
+        twiml_text = twiml_text.replace("https://localhost:5000", base).replace("http://localhost:5000", base)
+        twiml_text = twiml_text.replace("https://127.0.0.1:5000", base).replace("http://127.0.0.1:5000", base)
     
     return Response(twiml_text, status=status, mimetype="text/xml; charset=utf-8")
 
@@ -1493,8 +1495,9 @@ def tts_line_url(text: str, filename: str | None = None, base_url: str | None = 
 			print(f"[TTS DEBUG] No base URL available, returning None")
 			return None
 		
-		final_url = f"{base}/static/{mp3_rel}"
+		final_url = public_url(f"/static/{mp3_rel}")
 		print(f"[TTS DEBUG] Returning URL: {final_url}")
+		app.logger.info(f"[AUDIO] url={final_url}")
 		return final_url
 	else:
 		# Fallback to original behavior if cache manager not available
@@ -1526,8 +1529,9 @@ def tts_line_url(text: str, filename: str | None = None, base_url: str | None = 
 			print(f"[TTS DEBUG] No base URL available, returning None")
 			return None
 		
-		final_url = f"{base}/static/{mp3_rel}"
+		final_url = public_url(f"/static/{mp3_rel}")
 		print(f"[TTS DEBUG] Returning URL: {final_url}")
+		app.logger.info(f"[AUDIO] url={final_url}")
 		return final_url
 
 # ========== TTS Regeneration API ==========
@@ -5274,7 +5278,10 @@ def voice_post():
         # Record-first fallback (correct action path)
         vr.record(**record_args(abs_url(url_for("handle")), MAIN_MAXLEN, MAIN_TIMEOUT, beep_override=False))
 
-    return xml_response(vr)
+    resp = xml_response(vr)
+    if DIAG_TWILIO == 1:
+        app.logger.info(f"[VOICE] Final TwiML: {str(vr)}")
+    return resp
 
 # ===== NEW: first utterance Gather handler =====
 def build_confirmation_audio_url(text: str) -> str:
@@ -5313,7 +5320,7 @@ def handle_gather():
     
     # Log when DIAG_TWILIO==1
     if DIAG_TWILIO == 1:
-        app.logger.info("[GATHER] speech=%r conf=%r digits=%r", speech, conf, digits)
+        app.logger.info("[GATHER] speech=%r conf=%r digits=%r job=%s", speech, conf, digits, "pending")
     
     # Consider it **input present** if speech OR digits is non-empty. 
     # Ignore confidence unless conf is present AND float(conf) < 0.20 (extremely low).
