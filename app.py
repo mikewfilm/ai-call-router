@@ -53,6 +53,15 @@ MAIN_MAXLEN = int(os.getenv("MAIN_MAXLEN", "30"))
 MAIN_TIMEOUT = int(os.getenv("MAIN_TIMEOUT", "10"))
 USE_GATHER_MAIN = os.getenv("USE_GATHER_MAIN", "1") == "1"
 
+# --- BEGIN: hardened config defaults ---
+DIAG_TWILIO         = int(os.getenv("DIAG_TWILIO", "0"))
+DIAG_LOG_BODY_LIMIT = int(os.getenv("DIAG_LOG_BODY_LIMIT", "4000"))
+
+# Public base used to build absolute URLs that Twilio can fetch.
+# Example: https://ai-call-router-production.up.railway.app
+PUBLIC_WS_BASE = os.getenv("PUBLIC_WS_BASE", "").rstrip("/")
+# --- END: hardened config defaults ---
+
 # ===== FLASK APP CREATION =====
 app = Flask(__name__, static_folder="static")
 
@@ -1144,14 +1153,10 @@ def get_base_url() -> str:
     else:
         try:
             root = (request.url_root or "").rstrip("/")
-            # If running behind ngrok, avoid returning localhost which Twilio cannot reach
-            if "localhost" in root or "127.0.0.1" in root:
-                base = "https://91f78cab40b1.ngrok-free.app"
-            else:
-                base = "https://" + root[len("http://"):] if root.startswith("http://") else root
+            base = "https://" + root[len("http://"):] if root.startswith("http://") else root
         except RuntimeError:
             # Called outside of request context (e.g., during startup)
-            base = "https://91f78cab40b1.ngrok-free.app"
+            base = "https://localhost:5000"
     return base
 
 # Helper for absolute HTTPS URLs
@@ -1165,38 +1170,34 @@ def abs_url(path: str) -> str:
     base = PUBLIC_HTTP_BASE or (request.url_root if request else "")
     return urljoin(base, path).replace("http://", "https://", 1)
 
-def _log_twilio_request(label: str):
-    """Log comprehensive Twilio webhook request details for diagnostics"""
+def _log_twilio_request(raw: str, where: str):
     try:
-        from flask import request, current_app
-        hdrs = {k: v for k, v in request.headers.items()}
-        # Highlight useful Twilio headers
-        twilio_meta = {
-            "X-Twilio-Request-Id": hdrs.get("X-Twilio-Request-Id"),
-            "X-Twilio-Signature": hdrs.get("X-Twilio-Signature"),
-            "User-Agent": hdrs.get("User-Agent"),
-            "Content-Type": hdrs.get("Content-Type"),
-            "Host": hdrs.get("Host"),
-            "X-Forwarded-For": hdrs.get("X-Forwarded-For"),
-            "X-Forwarded-Proto": hdrs.get("X-Forwarded-Proto"),
-        }
-        # Raw body (limited)
-        raw = request.get_data(as_text=True) or ""
-        if len(raw) > DIAG_LOG_BODY_LIMIT:
-            raw = raw[:DIAG_LOG_BODY_LIMIT] + "...[truncated]"
-        # Parsed form/args
-        form = {k: request.form.get(k) for k in request.form.keys()}
-        args = {k: request.args.get(k) for k in request.args.keys()}
-        # Speech-specific fields
-        speech_result = (request.form.get("SpeechResult") or "").strip()
-        digits = (request.form.get("Digits") or "").strip()
-        current_app.logger.info(
-            "[TWILIO %s] headers=%s args=%s form=%s raw_len=%s SpeechResult_len=%s Digits=%s",
-            label, twilio_meta, args, {k: (v if k != "RecordingUrl" else "[redacted]") for k, v in form.items()},
-            len(raw), len(speech_result), digits
-        )
+        limit = DIAG_LOG_BODY_LIMIT if "DIAG_LOG_BODY_LIMIT" in globals() else 4000
+        snippet = raw if (raw is None or len(raw) <= limit) else raw[:limit] + "…(truncated)"
+        app.logger.info("[TWILIO %s] %s", where, snippet)
     except Exception as e:
-        current_app.logger.exception("Failed to log Twilio request: %s", e)
+        app.logger.error("Failed to log Twilio request: %s", e)
+
+def external_base() -> str:
+    if PUBLIC_WS_BASE:
+        return PUBLIC_WS_BASE
+    # request.url_root ends with slash; strip to normalize
+    return request.url_root.rstrip("/")
+
+def absolute(url_path: str) -> str:
+    if not url_path:
+        return external_base()
+    if url_path.startswith("http://") or url_path.startswith("https://"):
+        return url_path
+    if not url_path.startswith("/"):
+        url_path = "/" + url_path
+    return f"{external_base()}{url_path}"
+
+def build_confirmation_audio_url(filename_or_path: str) -> str:
+    path = filename_or_path
+    if not path.startswith("/static/"):
+        path = f"/static/tts_cache/{path}"
+    return absolute(path)
 
 # --- Redis-backed job state with in-proc fallback ---
 import os, json, time
@@ -1270,14 +1271,17 @@ def static_file_url(relpath: str) -> str:
 
 # --- Twilio XML helper (always text/xml) ---
 from flask import make_response
-def xml_response(vr, status: int = 200):
-    if hasattr(vr, '__str__'):
-        twiml = str(vr)
-    else:
-        twiml = vr
-    resp = make_response(twiml, status)
-    resp.headers["Content-Type"] = "text/xml; charset=utf-8"
-    return resp
+from flask import Response
+try:
+    from twilio.twiml.voice_response import VoiceResponse
+except Exception:
+    VoiceResponse = None  # optional import
+
+def xml_response(twiml_obj_or_text, status: int = 200):
+    twiml_text = str(twiml_obj_or_text) if VoiceResponse and isinstance(twiml_obj_or_text, VoiceResponse) else twiml_obj_or_text
+    if not isinstance(twiml_text, str):
+        twiml_text = str(twiml_text)
+    return Response(twiml_text, status=status, mimetype="text/xml; charset=utf-8")
 
 CACHE_SUBDIR = "tts_cache"
 
@@ -4152,7 +4156,7 @@ def prepare_final_route(job_id: str, base_url: str, confirmed_text: str):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Flask is running and reachable through ngrok."
+    return "Flask is running and reachable."
 
 
 
@@ -4616,48 +4620,48 @@ def _result_poll_url(base_url: str, job_id: str, meta: dict) -> str:
 
 @app.post("/result")
 def result():
-    job_id = request.args.get("job")
-    polls = int(request.args.get("n", "1"))
-    now_ms = int(time.time() * 1000)
+    from urllib.parse import urlencode
+    args = request.args or {}
+    job = (args.get("job") or "").strip()
+    n   = int(args.get("n") or "1")
+    t   = args.get("t") or ""
 
-    def hold_and_redirect():
-        nxt = url_for("result", job=job_id or "missing", n=polls+1, t=now_ms, _external=True)
-        return xml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Play>https://call-router-audio-2526.twil.io/holdy_tiny.mp3</Play>
-  <Pause length="2"/>
-  <Redirect method="POST">{nxt}</Redirect>
-</Response>""")
+    st = load_state(job) or {}
+    ready = bool(st.get("ready"))
+    phase = st.get("phase", "first_hold")
 
-    # job param missing? keep call alive and poll
-    if not job_id:
-        return hold_and_redirect()
+    # Not ready yet: keep the caller on hold and poll again
+    if not ready:
+        # Limit polls (e.g., 30 tries ~ 30 * hold clip length)
+        if n > 30:
+            bye = absolute("/static/tts_cache/no_recording.mp3")
+            return xml_response(f'<?xml version="1.0" encoding="UTF-8"?><Response><Play>{bye}</Play><Hangup/></Response>')
 
-    meta = load_state(job_id)
+        hold_url = absolute("/static/tts_cache/holdy_tiny.mp3")  # ensure this exists
+        next_qs = urlencode({"job": job, "n": n, "t": t})
+        next_url = absolute(f"/result?{next_qs}")
+        return xml_response(
+            f'<?xml version="1.0" encoding="UTF-8"?><Response>'
+            f'<Play>{hold_url}</Play>'
+            f'<Redirect method="POST">{next_url}</Redirect>'
+            f'</Response>'
+        )
 
-    # job state missing (redeploy)? never 404 — keep polling
-    if not meta:
-        return hold_and_redirect()
+    # Ready: play confirmation audio and re-gather
+    confirm_url = st.get("confirm_url", "")
+    prompt_url  = absolute(confirm_url) if confirm_url else absolute("/static/tts_cache/no_recording.mp3")
 
-    # not ready yet — bounded polling
-    if not meta.get("ready"):
-        if polls >= 8:  # ~16s of total hold (2s per poll)
-            handle_url = url_for("handle", _external=True) if "handle" in app.view_functions else url_for("result", job=job_id, n=polls+1, t=now_ms, _external=True)
-            return xml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Play>https://call-router-audio-2526.twil.io/holdy_tiny.mp3</Play>
-  <Redirect method="POST">{handle_url}</Redirect>
-</Response>""")
-        return hold_and_redirect()
-
-    # READY: play the final audio
-    play_url = meta.get("play_url") or url_for("static", filename="tts_cache/no_recording.mp3", _external=True)
-    clear_state(job_id)
-
-    return xml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Play>{play_url}</Play>
-</Response>""")
+    # Build the next gather (use your standard defaults helper if you have one)
+    # Make sure speechModel="phone_call" and numeric speechTimeout
+    gather_action = absolute(f"/confirm?job={job}")
+    gather = (
+        f'<Gather input="speech" language="en-US" method="POST" '
+        f'speechModel="phone_call" speechTimeout="7" timeout="5" '
+        f'action="{gather_action}" hints="yes, no, correct, wrong">'
+        f'<Play>{prompt_url}</Play>'
+        f'</Gather>'
+    )
+    return xml_response(f'<?xml version="1.0" encoding="UTF-8"?><Response>{gather}</Response>')
 
 
 
@@ -5193,23 +5197,33 @@ def start_async_processing(job_id: str, text: str):
 
 @app.post("/handle_gather")
 def handle_gather():
-    call_id = request.args.get("call_id") or str(uuid.uuid4())
-    text = (request.form.get("SpeechResult") or "").strip()
+    # read inputs
+    form = request.form or {}
+    call_sid = form.get("CallSid", "")
+    speech = (form.get("SpeechResult") or "").strip()
 
-    save_state(call_id, {
-        "id": call_id,
+    # create a job id (use your existing generator if present)
+    import uuid, time
+    job_id = str(uuid.uuid4())
+    now_ms = int(time.time() * 1000)
+
+    # initialize state
+    state = {
+        "job_id": job_id,
+        "phase": "first_hold",
         "ready": False,
-        "created": time.time(),
-        "input": text,
-    }, ttl_sec=900)
+        "call_sid": call_sid,
+        "heard": speech,
+        "created_ms": now_ms,
+    }
+    save_state(job_id, state)
 
-    start_async_processing(call_id, text)
+    # start async processing (use your existing queue/thread/task util if present)
+    start_async_processing(job_id, speech)  # implement or call your existing function
 
-    nxt = url_for("result", job=call_id, n=1, t=int(time.time()*1000), _external=True)
-    return xml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Redirect method="POST">{nxt}</Redirect>
-</Response>""")
+    # immediately redirect Twilio to /result poller (absolute URL!)
+    next_url = absolute(f"/result?job={job_id}&n=1&t={now_ms}")
+    return xml_response(f'<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">{next_url}</Redirect></Response>')
     
 @app.route("/dept_choice", methods=["POST"])
 def dept_choice():
