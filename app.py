@@ -53,6 +53,14 @@ MAIN_MAXLEN = int(os.getenv("MAIN_MAXLEN", "30"))
 MAIN_TIMEOUT = int(os.getenv("MAIN_TIMEOUT", "10"))
 USE_GATHER_MAIN = os.getenv("USE_GATHER_MAIN", "1") == "1"
 
+# ===== FLASK APP CREATION =====
+app = Flask(__name__, static_folder="static")
+
+# Configure ProxyFix for Railway deployment
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+app.config.setdefault("PREFERRED_URL_SCHEME", "https")
+
 # Optional Whisper imports - only load if explicitly enabled
 logger = logging.getLogger(__name__)
 FasterWhisper = None
@@ -1101,12 +1109,6 @@ def _get_whisper_impl():
         return transcribe_legacy
     return None
 
-app = Flask(__name__, static_folder="static")
-
-# Configure ProxyFix for Railway deployment
-from werkzeug.middleware.proxy_fix import ProxyFix
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
-app.config.setdefault("PREFERRED_URL_SCHEME", "https")
 
 # Global error handlers for Twilio webhooks (fix 12300)
 @app.errorhandler(404)
