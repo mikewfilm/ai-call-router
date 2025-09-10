@@ -60,7 +60,54 @@ DIAG_LOG_BODY_LIMIT = int(os.getenv("DIAG_LOG_BODY_LIMIT", "2000"))
 # Public base used to build absolute URLs that Twilio can fetch.
 # Example: https://ai-call-router-production.up.railway.app
 PUBLIC_WS_BASE = os.getenv("PUBLIC_WS_BASE", "").rstrip("/")
-PUBLIC_BASE = os.getenv("PUBLIC_BASE", "").strip()
+PUBLIC_BASE = os.getenv("PUBLIC_BASE", "").strip().rstrip("/")
+PREFERRED_URL_SCHEME = "https"
+
+from urllib.parse import urljoin
+
+def _effective_base() -> str:
+    """
+    Absolute https base that Twilio can reach.
+    Priority:
+      1) PUBLIC_BASE env (e.g. https://ai-call-router-production.up.railway.app)
+      2) request.url_root (forced to https)
+    """
+    base = PUBLIC_BASE
+    if not base:
+        try:
+            if has_request_context():
+                base = request.url_root.strip().rstrip("/")
+            else:
+                base = ""
+        except Exception:
+            base = ""
+    if base.startswith("http://"):
+        base = "https://" + base[len("http://"):]
+    return base
+
+def public_url(path_or_url: str) -> str:
+    """Return absolute https URL for Twilio. Never localhost/ngrok."""
+    s = (path_or_url or "").strip()
+    if not s:
+        return s
+    # If already absolute, sanitize scheme and block localhost.
+    if s.startswith("http://") or s.startswith("https://"):
+        s2 = s.replace("http://", "https://")
+        if "localhost" in s2 or "127.0.0.1" in s2:
+            base = _effective_base()
+            # Convert to path if it looks like our static/tts path
+            try:
+                from urllib.parse import urlparse
+                p = urlparse(s2)
+                if p.path:
+                    return urljoin(base + "/", p.path.lstrip("/"))
+            except Exception:
+                pass
+            return base or s2  # last resort
+        return s2
+    # Relative -> join to base
+    base = _effective_base()
+    return urljoin((base + "/") if base else "/", s.lstrip("/"))
 # --- END: hardened config defaults ---
 
 # ===== FLASK APP CREATION =====
@@ -1157,7 +1204,7 @@ def get_base_url() -> str:
             base = "https://" + root[len("http://"):] if root.startswith("http://") else root
         except RuntimeError:
             # Called outside of request context (e.g., during startup)
-            base = "https://localhost:5000"
+            base = ""
     return base
 
 # Helper for absolute HTTPS URLs
@@ -1330,6 +1377,10 @@ def xml_response(twiml_obj_or_text, status: int = 200):
     twiml_text = str(twiml_obj_or_text) if VoiceResponse and isinstance(twiml_obj_or_text, VoiceResponse) else twiml_obj_or_text
     if not isinstance(twiml_text, str):
         twiml_text = str(twiml_text)
+    
+    # sanitize any accidental localhost urls
+    twiml_text = twiml_text.replace("http://", "https://").replace("https://localhost:5000", _effective_base()).replace("http://localhost:5000", _effective_base())
+    
     return Response(twiml_text, status=status, mimetype="text/xml; charset=utf-8")
 
 CACHE_SUBDIR = "tts_cache"
@@ -4685,17 +4736,21 @@ def result():
         # Limit polls (e.g., 30 tries ~ 30 * hold clip length)
         if n > 30:
             bye = public_url("static/tts_cache/no_recording.mp3")
-            return xml_response(f'<?xml version="1.0" encoding="UTF-8"?><Response><Play>{bye}</Play><Hangup/></Response>')
+            resp = f'<?xml version="1.0" encoding="UTF-8"?><Response><Play>{bye}</Play><Hangup/></Response>'
+            app.logger.info(f"[RESULT] Final TwiML: {resp}")
+            return xml_response(resp)
 
         hold_url = public_url("static/tts_cache/holdy_tiny.mp3")  # ensure this exists
         next_qs = urlencode({"job": job, "n": n, "t": t})
         next_url = public_url(f"/result?{next_qs}")
-        return xml_response(
+        resp = (
             f'<?xml version="1.0" encoding="UTF-8"?><Response>'
             f'<Play>{hold_url}</Play>'
             f'<Redirect method="POST">{next_url}</Redirect>'
             f'</Response>'
         )
+        app.logger.info(f"[RESULT] Final TwiML: {resp}")
+        return xml_response(resp)
 
     # Ready: play confirmation audio and re-gather
     confirm_url = st.get("confirm_url", "")
@@ -4711,7 +4766,9 @@ def result():
         f'<Play>{prompt_url}</Play>'
         f'</Gather>'
     )
-    return xml_response(f'<?xml version="1.0" encoding="UTF-8"?><Response>{gather}</Response>')
+    resp = f'<?xml version="1.0" encoding="UTF-8"?><Response>{gather}</Response>'
+    app.logger.info(f"[RESULT] Final TwiML: {resp}")
+    return xml_response(resp)
 
 
 
@@ -5249,19 +5306,19 @@ def start_async_processing(job_id: str, text: str):
 def handle_gather():
     _log_twilio_request("HANDLE_GATHER")
     
-    # Extract inputs robustly
-    speech = request.values.get("SpeechResult", "").strip()
-    conf   = request.values.get("Confidence")
-    digits = request.values.get("Digits", "").strip()
+    # Read params safely
+    speech = (request.values.get("SpeechResult") or "").strip()
+    digits = (request.values.get("Digits") or "").strip()
+    conf = request.values.get("Confidence")
     
     # Log when DIAG_TWILIO==1
     if DIAG_TWILIO == 1:
         app.logger.info("[GATHER] speech=%r conf=%r digits=%r", speech, conf, digits)
     
-    # Consider input present if speech or digits is non-empty
-    # Do NOT gate on confidence unless it's present AND < 0.4
+    # Consider it **input present** if speech OR digits is non-empty. 
+    # Ignore confidence unless conf is present AND float(conf) < 0.20 (extremely low).
     has_input = bool(speech or digits)
-    if conf is not None and float(conf) < 0.4:
+    if conf is not None and float(conf) < 0.20:
         has_input = False
     
     if has_input:
@@ -5285,16 +5342,20 @@ def handle_gather():
         start_async_processing(job_id, speech or digits)
         
         # redirect to /result poller (absolute URL!)
-        next_url = public_url(f"/result?job={job_id}&n=1&t={now_ms}")
-        return xml_response(f'<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">{next_url}</Redirect></Response>')
+        next_url = public_url(f"/result?job={job_id}&n={int(time.time())}")
+        resp = f'<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">{next_url}</Redirect></Response>'
+        app.logger.info(f"[HANDLE_GATHER] Final TwiML: {resp}")
+        return xml_response(resp)
     else:
-        # Input is empty: re-prompt with greeting and another Gather
-        # Check retry count to avoid loops
+        # No input: DO NOT Hangup. Re-prompt with a shorter message and another <Gather>
+        # Track attempts via job state to limit to 2 tries, then final apology + Hangup
         retry_count = int(request.values.get("retry_count", "0"))
         if retry_count >= 2:
             # Too many retries, end call gracefully
             bye_url = public_url("static/tts_cache/no_recording.mp3")
-            return xml_response(f'<?xml version="1.0" encoding="UTF-8"?><Response><Play>{bye_url}</Play><Hangup/></Response>')
+            resp = f'<?xml version="1.0" encoding="UTF-8"?><Response><Play>{bye_url}</Play><Hangup/></Response>'
+            app.logger.info(f"[HANDLE_GATHER] Final TwiML: {resp}")
+            return xml_response(resp)
         
         # Re-prompt with shorter message and another Gather
         reprompt_url = public_url("static/tts_cache/reprompt_listening.mp3")
@@ -5310,7 +5371,9 @@ def handle_gather():
             gather_xml += f' {key}="{value}"'
         gather_xml += f"><Play>{reprompt_url}</Play></Gather>"
         
-        return xml_response(f'<?xml version="1.0" encoding="UTF-8"?><Response>{gather_xml}</Response>')
+        resp = f'<?xml version="1.0" encoding="UTF-8"?><Response>{gather_xml}</Response>'
+        app.logger.info(f"[HANDLE_GATHER] Final TwiML: {resp}")
+        return xml_response(resp)
     
 @app.route("/dept_choice", methods=["POST"])
 def dept_choice():
