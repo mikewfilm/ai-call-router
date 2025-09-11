@@ -5,6 +5,7 @@ import uuid
 import threading
 import re
 import hashlib
+import hmac
 import random
 import time
 import traceback
@@ -55,6 +56,60 @@ USE_GATHER_MAIN = os.getenv("USE_GATHER_MAIN", "1") == "1"
 # --- BEGIN: hardened config defaults ---
 DIAG_TWILIO         = int(os.getenv("DIAG_TWILIO", "0") or 0)
 DIAG_LOG_BODY_LIMIT = int(os.getenv("DIAG_LOG_BODY_LIMIT", "4000") or 4000)
+
+# -------- Twilio Webhook Diagnostics (safe to keep in prod, gated by DIAG_TWILIO) --------
+DIAG_TWILIO = os.getenv("DIAG_TWILIO", "0") == "1"
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+
+def _b64_hmac_sha1(key: str, msg: bytes) -> str:
+    return base64.b64encode(hmac.new(key.encode("utf-8"), msg, hashlib.sha1).digest()).decode("utf-8")
+
+def _twilio_signature_status() -> str:
+    """
+    Recompute Twilio signature per spec:
+    1) Start with the full request URL without query string (Twilio signs the URL it posts to; if behind a proxy ensure your PUBLIC_BASE is correct).
+    2) Append each POST param as key+value in key-sorted order.
+    3) Base64(HMAC-SHA1(auth_token, concatenated_string)).
+    """
+    try:
+        sig_hdr = request.headers.get("X-Twilio-Signature", "") or ""
+        if not TWILIO_AUTH_TOKEN:
+            return f"VERIFY_ERROR(no TWILIO_AUTH_TOKEN)"
+        url = request.url.split("?")[0]
+        # Ensure all form params included in sorted key order; include each value for list-typed fields.
+        pieces = [url] + [k + v for k in sorted(request.form.keys()) for v in request.form.getlist(k)]
+        computed = _b64_hmac_sha1(TWILIO_AUTH_TOKEN, "".join(pieces).encode("utf-8"))
+        ok = hmac.compare_digest(sig_hdr, computed)
+        return f"{'OK' if ok else 'MISMATCH'} (hdr={sig_hdr} cmp={computed})"
+    except Exception as e:
+        return f"VERIFY_ERROR({e})"
+
+def log_twilio_webhook(where: str) -> None:
+    """
+    Log exactly what Twilio posted. No-ops if DIAG_TWILIO != 1.
+    Safe for production; emits at INFO level.
+    """
+    if not DIAG_TWILIO:
+        return
+    # Curate headers for noise reduction
+    hdr_whitelist = {"user-agent","content-type","x-twilio-signature","x-forwarded-for","x-forwarded-proto","x-request-id"}
+    hdrs = {k: v for k, v in request.headers.items() if k.lower() in hdr_whitelist}
+    form_dict = {k: request.form.getlist(k) for k in request.form.keys()}
+    try:
+        raw = request.get_data(as_text=True)  # exact body
+    except Exception:
+        raw = "<unavailable>"
+
+    try:
+        sig_status = _twilio_signature_status()
+    except Exception as e:
+        sig_status = f"VERIFY_ERROR({e})"
+
+    current_app.logger.info("[TWILIO %s] url=%s method=%s sig_check=%s", where, request.url, request.method, sig_status)
+    current_app.logger.info("[TWILIO %s] headers=%s", where, json.dumps(hdrs))
+    current_app.logger.info("[TWILIO %s] form=%s", where, json.dumps(form_dict))
+    current_app.logger.info("[TWILIO %s] raw=%s", where, raw)
+# -------- end diagnostics --------
 
 # --- Build fingerprint (for deploy verification) ---
 BUILD_ID = os.getenv("BUILD_ID", time.strftime("%Y%m%d-%H%M%S"))
@@ -4741,6 +4796,7 @@ def _result_poll_url(base_url: str, job_id: str, meta: dict) -> str:
 
 @app.post("/result")
 def result():
+    log_twilio_webhook("RESULT")
     job = None
     try:
         _log_twilio_request("RESULT")
@@ -5302,6 +5358,7 @@ def voice_get():
 
 @app.route("/voice", methods=["POST"])
 def voice_post():
+    log_twilio_webhook("VOICE")
     _log_twilio_request("VOICE")
     # Generate unique call ID for credit tracking
     call_id = str(uuid.uuid4())
@@ -5407,6 +5464,7 @@ def save_state_and_start_async_process(speech: str, digits: str) -> str:
 
 @app.post("/handle_gather")
 def handle_gather():
+    log_twilio_webhook("GATHER")
     job_id = None
     try:
         current_app.logger.info(
