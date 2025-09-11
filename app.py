@@ -5412,32 +5412,33 @@ def build_confirmation_audio_url(text: str) -> str:
 
 def start_async_processing(job_id: str, text: str):
     def _work():
-        try:
-            # Update status to processing
-            update_state(job_id, {"status": "processing", "last_update": time.time()})
-            
-            # TODO: call your existing routing/LLM/TTS and produce a final mp3 URL reachable by Twilio
-            final_url = build_confirmation_audio_url(text)  # use your existing function; if not present, create it to return /static/tts_cache/...mp3
-            
-            # Update with completion
-            update_state(job_id, {
-                "status": "done", 
-                "ready": True, 
-                "play_url": final_url,
-                "answer_text": f"Got it: {text}",
-                "last_update": time.time()
-            })
-            current_app.logger.info("[STATE] async processing completed job=%s", job_id)
-        except Exception as e:
-            current_app.logger.exception("[STATE] ERROR in async processing job=%s", job_id)
-            # extreme fallback: safe mp3 that exists
-            fallback = public_url("static/tts_cache/holdy_tiny.mp3")
-            update_state(job_id, {
-                "status": "error", 
-                "ready": True, 
-                "play_url": fallback,
-                "last_update": time.time()
-            })
+        with app.app_context():
+            try:
+                # Update status to processing
+                update_state(job_id, {"status": "processing", "last_update": time.time()})
+                
+                # TODO: call your existing routing/LLM/TTS and produce a final mp3 URL reachable by Twilio
+                final_url = build_confirmation_audio_url(text)  # use your existing function; if not present, create it to return /static/tts_cache/...mp3
+                
+                # Update with completion
+                update_state(job_id, {
+                    "status": "done", 
+                    "ready": True, 
+                    "play_url": final_url,
+                    "answer_text": f"Got it: {text}",
+                    "last_update": time.time()
+                })
+                current_app.logger.info("[STATE] async processing completed job=%s", job_id)
+            except Exception as e:
+                current_app.logger.exception("[STATE] ERROR in async processing job=%s", job_id)
+                # extreme fallback: safe mp3 that exists
+                fallback = public_url("static/tts_cache/holdy_tiny.mp3")
+                update_state(job_id, {
+                    "status": "error", 
+                    "ready": True, 
+                    "play_url": fallback,
+                    "last_update": time.time()
+                })
     threading.Thread(target=_work, daemon=True).start()
 
 def save_state_and_start_async_process(speech: str, digits: str) -> str:
