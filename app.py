@@ -1341,19 +1341,28 @@ def _fb_del(key):
 
 def save_state(job_id: str, data: dict, ttl_sec: int = 900):
     key = f"job:{job_id}"
-    r = get_redis()
-    if r:
-        r.setex(key, ttl_sec, json.dumps(data))
-    else:
-        _fb_set(key, data, ttl_sec)
+    try:
+        r = get_redis()
+        if r:
+            r.setex(key, ttl_sec, json.dumps(data))
+        else:
+            _fb_set(key, data, ttl_sec)
+        current_app.logger.info("[STATE] saved job=%s data=%s", job_id, data)
+    except Exception as e:
+        current_app.logger.exception("[STATE] ERROR saving job=%s", job_id)
+        raise
 
 def load_state(job_id: str) -> Optional[dict]:
     key = f"job:{job_id}"
-    r = get_redis()
-    if r:
-        js = r.get(key)
-        return json.loads(js) if js else None
-    return _fb_get(key)
+    try:
+        r = get_redis()
+        if r:
+            js = r.get(key)
+            return json.loads(js) if js else None
+        return _fb_get(key)
+    except Exception as e:
+        current_app.logger.exception("[STATE] ERROR loading job=%s", job_id)
+        return None
 
 def update_state(job_id: str, updates: dict, ttl_sec: int = 900) -> dict:
     cur = load_state(job_id) or {}
@@ -4732,23 +4741,50 @@ def _result_poll_url(base_url: str, job_id: str, meta: dict) -> str:
 
 @app.post("/result")
 def result():
-    _log_twilio_request("RESULT")
-    from urllib.parse import urlencode
-    args = request.args or {}
-    job = (args.get("job") or "").strip()
-    n   = int(args.get("n") or "1")
-    t   = args.get("t") or ""
+    job = None
+    try:
+        _log_twilio_request("RESULT")
+        from urllib.parse import urlencode
+        args = request.args or {}
+        job = (args.get("job") or "").strip()
+        n   = int(args.get("n") or "1")
+        t   = args.get("t") or ""
 
-    st = load_state(job) or {}
-    ready = bool(st.get("ready"))
-    phase = st.get("phase", "first_hold")
+        st = load_state(job) or {}
+        ready = bool(st.get("ready"))
+        phase = st.get("phase", "first_hold")
+        
+        # Log state for debugging
+        current_app.logger.info("[STATE] /result job=%s loaded=%s form=%s args=%s",
+                                job, st, dict(request.form), dict(request.args))
+    except Exception as e:
+        current_app.logger.exception("[STATE] ERROR in /result job=%s", job)
+        # Return a safe response on error
+        tw = VoiceResponse()
+        tw.play(public_url("/static/tts_cache/holdy_tiny.mp3"))
+        return xml_response(tw)
 
+    # Check if we have speech/digits input - if so, never play "no_recording"
+    has_input = bool(st.get("speech") or st.get("digits"))
+    
     # Not ready yet: keep the caller on hold and poll again
     if not ready:
-        # Limit polls (e.g., 30 tries ~ 30 * hold clip length)
-        if n > 30:
-            bye = public_url("static/tts_cache/no_recording.mp3")
-            resp = f'<?xml version="1.0" encoding="UTF-8"?><Response><Play>{bye}</Play><Hangup/></Response>'
+        # Check for timeout conditions
+        created_at = st.get("created_at", 0)
+        age_seconds = time.time() - created_at if created_at else 0
+        
+        # Limit polls or age - but only play "no_recording" if no input was received
+        if n > 8 or age_seconds > 15:
+            if has_input:
+                # We have input but processing failed - play a friendly message instead of "no_recording"
+                bye = public_url("static/tts_cache/holdy_tiny.mp3")
+                resp = f'<?xml version="1.0" encoding="UTF-8"?><Response><Play>{bye}</Play><Hangup/></Response>'
+                current_app.logger.info("[STATE] /result timeout with input, playing holdy_tiny instead of no_recording")
+            else:
+                # No input received - safe to play "no_recording"
+                bye = public_url("static/tts_cache/no_recording.mp3")
+                resp = f'<?xml version="1.0" encoding="UTF-8"?><Response><Play>{bye}</Play><Hangup/></Response>'
+                current_app.logger.info("[STATE] /result timeout with no input, playing no_recording")
             app.logger.info(f"[RESULT] Final TwiML: {resp}")
             return xml_response(resp)
 
@@ -4766,7 +4802,15 @@ def result():
 
     # Ready: play confirmation audio and re-gather
     confirm_url = st.get("confirm_url", "")
-    prompt_url  = public_url(confirm_url) if confirm_url else public_url("static/tts_cache/no_recording.mp3")
+    if confirm_url:
+        prompt_url = public_url(confirm_url)
+    elif has_input:
+        # We have input but no confirmation URL - play a friendly message
+        prompt_url = public_url("static/tts_cache/holdy_tiny.mp3")
+        current_app.logger.info("[STATE] /result ready with input but no confirm_url, playing holdy_tiny")
+    else:
+        # No input and no confirmation - safe to play "no_recording"
+        prompt_url = public_url("static/tts_cache/no_recording.mp3")
 
     # Build the next gather (use your standard defaults helper if you have one)
     # Make sure speechModel="phone_call" and numeric speechTimeout
@@ -5312,13 +5356,31 @@ def build_confirmation_audio_url(text: str) -> str:
 def start_async_processing(job_id: str, text: str):
     def _work():
         try:
+            # Update status to processing
+            update_state(job_id, {"status": "processing", "last_update": time.time()})
+            
             # TODO: call your existing routing/LLM/TTS and produce a final mp3 URL reachable by Twilio
             final_url = build_confirmation_audio_url(text)  # use your existing function; if not present, create it to return /static/tts_cache/...mp3
-            update_state(job_id, {"ready": True, "play_url": final_url})
-        except Exception:
+            
+            # Update with completion
+            update_state(job_id, {
+                "status": "done", 
+                "ready": True, 
+                "play_url": final_url,
+                "answer_text": f"Got it: {text}",
+                "last_update": time.time()
+            })
+            current_app.logger.info("[STATE] async processing completed job=%s", job_id)
+        except Exception as e:
+            current_app.logger.exception("[STATE] ERROR in async processing job=%s", job_id)
             # extreme fallback: safe mp3 that exists
-            fallback = public_url("static/tts_cache/no_recording.mp3")
-            update_state(job_id, {"ready": True, "play_url": fallback})
+            fallback = public_url("static/tts_cache/holdy_tiny.mp3")
+            update_state(job_id, {
+                "status": "error", 
+                "ready": True, 
+                "play_url": fallback,
+                "last_update": time.time()
+            })
     threading.Thread(target=_work, daemon=True).start()
 
 def save_state_and_start_async_process(speech: str, digits: str) -> str:
@@ -5345,29 +5407,55 @@ def save_state_and_start_async_process(speech: str, digits: str) -> str:
 
 @app.post("/handle_gather")
 def handle_gather():
-    current_app.logger.info(
-        "[GATHER] form_keys=%s raw_form=%r content_type=%s",
-        list(request.form.keys()), dict(request.form), request.content_type
-    )
-    form = request.form or {}
-    speech = (form.get("SpeechResult") or "").strip()
-    digits = (form.get("Digits") or "").strip()
-    conf_raw = form.get("Confidence")
+    job_id = None
     try:
-        conf = float(conf_raw) if conf_raw is not None else 0.0
-    except Exception:
-        conf = 0.0
+        current_app.logger.info(
+            "[GATHER] form_keys=%s raw_form=%r content_type=%s",
+            list(request.form.keys()), dict(request.form), request.content_type
+        )
+        form = request.form or {}
+        speech = (form.get("SpeechResult") or "").strip()
+        digits = (form.get("Digits") or "").strip()
+        conf_raw = form.get("Confidence")
+        try:
+            conf = float(conf_raw) if conf_raw is not None else 0.0
+        except Exception:
+            conf = 0.0
 
-    if DIAG_TWILIO:
-        current_app.logger.info("[GATHER] keys=%s speech=%r digits=%r conf=%.3f",
-                                list(form.keys()), speech, digits, conf)
+        if DIAG_TWILIO:
+            current_app.logger.info("[GATHER] keys=%s speech=%r digits=%r conf=%.3f",
+                                    list(form.keys()), speech, digits, conf)
 
-    # If Twilio sent anything at all, treat as input
-    if speech or digits:
-        # TODO: your job dispatch/state save here -> returns job_id
-        job_id = save_state_and_start_async_process(speech, digits)  # <--- use your helper
+        # If Twilio sent anything at all, treat as input
+        if speech or digits:
+            # Generate job_id and store input immediately
+            import uuid
+            job_id = str(uuid.uuid4())
+            
+            # Store speech/digits in state immediately
+            state = {
+                "status": "queued",          # queued | processing | done | error
+                "speech": speech,
+                "digits": digits,
+                "confidence": conf,
+                "created_at": time.time(),
+                "last_update": time.time(),
+                "call_sid": request.values.get("CallSid", ""),
+            }
+            save_state(job_id, state)
+            current_app.logger.info("[STATE] /handle_gather saved job=%s state=%s", job_id, state)
+            
+            # Start async processing
+            start_async_processing(job_id, speech or digits)
+            
+            tw = VoiceResponse()
+            tw.redirect(public_url(f"/result?job={job_id}"), method="POST")
+            return xml_response(tw)
+    except Exception as e:
+        current_app.logger.exception("[STATE] ERROR in /handle_gather job=%s", job_id)
+        # Return a safe response on error
         tw = VoiceResponse()
-        tw.redirect(public_url(f"/result?job={job_id}"), method="POST")
+        tw.play(public_url("/static/tts_cache/holdy_tiny.mp3"))
         return xml_response(tw)
 
     # No input: re-prompt, DO NOT hang up
