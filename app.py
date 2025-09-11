@@ -29,6 +29,22 @@ import traceback
 import asyncio
 import aiohttp
 
+# Global logger and BASE_URL configuration
+logger = logging.getLogger("app")
+
+PUBLIC_BASE = os.getenv("PUBLIC_BASE", "").rstrip("/")
+if not PUBLIC_BASE:
+    # Try Railway hint, then fail fast.
+    RB = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip()
+    if RB:
+        if not RB.startswith("http"):
+            RB = "https://" + RB
+        PUBLIC_BASE = RB.rstrip("/")
+if not PUBLIC_BASE:
+    raise RuntimeError("PUBLIC_BASE is required for Twilio: set it to your public https base (e.g., https://ai-call-router-production.up.railway.app)")
+
+logger.info("[BOOT] PUBLIC_BASE=%s", PUBLIC_BASE)
+
 # ===== CONFIG ORDER + DEFAULTS =====
 # All config flags and constants with safe defaults - defined before ANY route definitions
 GATHER_TIMEOUT = int(os.getenv("GATHER_TIMEOUT", "5"))
@@ -143,20 +159,32 @@ def _effective_base() -> str:
     return base
 
 def public_url(path_or_url: str) -> str:
+    """
+    Always return an absolute HTTPS URL usable by Twilio.
+    Rules:
+      - If already absolute https, return as-is.
+      - Else, join with global PUBLIC_BASE.
+      - Never use request context in background paths.
+    """
     if not path_or_url:
-        raise RuntimeError("public_url called with empty value")
-    if path_or_url.startswith("https://"):
+        raise ValueError("public_url() called with empty path_or_url")
+
+    # Already absolute HTTPS?
+    if re.match(r"^https://", path_or_url):
         return path_or_url
-    base = os.getenv("PUBLIC_BASE", "").rstrip("/")
-    if base:
-        return f"{base}{path_or_url if path_or_url.startswith('/') else '/' + path_or_url}"
-    # only safe inside a request context; otherwise raise
-    try:
-        from flask import request
-        root = request.url_root.rstrip("/")
-        return f"{root}{path_or_url if path_or_url.startswith('/') else '/' + path_or_url}".replace("http://","https://")
-    except Exception:
-        raise RuntimeError("No PUBLIC_BASE and no request context; cannot build public URL")
+
+    # Strip accidental http -> force https
+    if path_or_url.startswith("http://"):
+        path_or_url = "https://" + path_or_url[len("http://"):]
+
+    base = PUBLIC_BASE  # global, guaranteed by boot check
+    if not base:
+        # Safety: should not happen after boot check
+        raise RuntimeError("PUBLIC_BASE not set at runtime")
+
+    if not path_or_url.startswith("/"):
+        return f"{base}/{path_or_url}"
+    return f"{base}{path_or_url}"
 
 def sanitize_twiml_xml(xml: str) -> str:
     # make http -> https, and replace any localhost/127.* with PUBLIC_BASE
@@ -175,6 +203,9 @@ app = Flask(__name__, static_folder="static")
 
 # Log the build ID at boot so we can confirm the running version via logs
 app.logger.info("[BUILD] %s", BUILD_ID)
+
+# Startup sanity log
+logger.info("[BOOT] Ready. PUBLIC_BASE=%s, DIAG_TWILIO=%s", PUBLIC_BASE, os.getenv("DIAG_TWILIO", "0"))
 
 # Configure ProxyFix for Railway deployment
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -1528,20 +1559,15 @@ def tts_line_url(text: str, filename: str | None = None, base_url: str | None = 
 		if "/" not in mp3_rel:
 			mp3_rel = f"{CACHE_SUBDIR}/{mp3_rel}"
 		
-		if base_url:
-			base = base_url
-		elif PUBLIC_BASE_URL:
-			base = PUBLIC_BASE_URL
-		elif has_request_context():
-			base = get_base_url()
-		else:
-			print(f"[TTS DEBUG] No base URL available, returning None")
-			return None
-		
-		final_url = public_url(f"/static/{mp3_rel}")
-		print(f"[TTS DEBUG] Returning URL: {final_url}")
-		app.logger.info(f"[AUDIO] url={final_url}")
-		return final_url
+		try:
+			final_url = public_url(f"/static/{mp3_rel}")
+			print(f"[TTS DEBUG] Returning URL: {final_url}")
+			app.logger.info(f"[AUDIO] url={final_url}")
+			return final_url
+		except Exception as e:
+			logger.exception("[AUDIO] Failed to build public URL for %r", f"/static/{mp3_rel}")
+			# Provide a safe Twilio-hosted fallback tone so Twilio has something to fetch
+			return "https://api.twilio.com/cowbell.mp3"  # harmless short tone
 	else:
 		# Fallback to original behavior if cache manager not available
 		if filename:
@@ -1562,20 +1588,15 @@ def tts_line_url(text: str, filename: str | None = None, base_url: str | None = 
 		if "/" not in mp3_rel:
 			mp3_rel = f"{CACHE_SUBDIR}/{mp3_rel}"
 		
-		if base_url:
-			base = base_url
-		elif PUBLIC_BASE_URL:
-			base = PUBLIC_BASE_URL
-		elif has_request_context():
-			base = get_base_url()
-		else:
-			print(f"[TTS DEBUG] No base URL available, returning None")
-			return None
-		
-		final_url = public_url(f"/static/{mp3_rel}")
-		print(f"[TTS DEBUG] Returning URL: {final_url}")
-		app.logger.info(f"[AUDIO] url={final_url}")
-		return final_url
+		try:
+			final_url = public_url(f"/static/{mp3_rel}")
+			print(f"[TTS DEBUG] Returning URL: {final_url}")
+			app.logger.info(f"[AUDIO] url={final_url}")
+			return final_url
+		except Exception as e:
+			logger.exception("[AUDIO] Failed to build public URL for %r", f"/static/{mp3_rel}")
+			# Provide a safe Twilio-hosted fallback tone so Twilio has something to fetch
+			return "https://api.twilio.com/cowbell.mp3"  # harmless short tone
 
 # ========== TTS Regeneration API ==========
 @app.route("/api/tts/regenerate", methods=["POST"])
@@ -5322,6 +5343,13 @@ def debug_echo():
         "method": request.method
     }), 200
 
+@app.post("/twiml-selftest")
+def twiml_selftest():
+    from twilio.twiml.voice_response import VoiceResponse
+    vr = VoiceResponse()
+    vr.play(public_url("/static/tts_cache/no_recording.mp3"))
+    return app.response_class(response=str(vr), status=200, mimetype="text/xml")
+
 @app.route("/voice", methods=["GET"])
 def voice_get():
     return "POST /voice only (Twilio webhook)."
@@ -5403,9 +5431,9 @@ def start_async_processing(job_id: str, text: str):
                     "answer_text": f"Got it: {text}",
                     "last_update": time.time()
                 })
-                current_app.logger.info("[STATE] async processing completed job=%s", job_id)
+                logger.info("[STATE] async processing completed job=%s", job_id)
             except Exception as e:
-                current_app.logger.exception("[STATE] ERROR in async processing job=%s", job_id)
+                logger.exception("[STATE] ERROR in async processing job=%s", job_id)
                 # extreme fallback: safe mp3 that exists
                 fallback = public_url("static/tts_cache/holdy_tiny.mp3")
                 update_state(job_id, {
