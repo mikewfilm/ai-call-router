@@ -46,6 +46,12 @@ logger.info("[BOOT] PUBLIC_BASE=%s", PUBLIC_BASE)
 # Module-level flag for one-time warning
 _BASE_WARNED = False
 
+def _env_bool(name: str, default=False):
+    v = os.getenv(name)
+    if v is None: 
+        return default
+    return v.strip().lower() in ("1", "true", "t", "yes", "y", "on")
+
 # ===== CONFIG ORDER + DEFAULTS =====
 # All config flags and constants with safe defaults - defined before ANY route definitions
 GATHER_TIMEOUT = int(os.getenv("GATHER_TIMEOUT", "5"))
@@ -57,7 +63,7 @@ USE_LOCAL_WHISPER = int(os.getenv("USE_LOCAL_WHISPER", "0"))
 GATHER_SPEECH_SECONDS = int(os.getenv("GATHER_SPEECH_SECONDS", "7"))
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
 USE_FILLER = os.getenv("USE_FILLER", "1") == "1"
-VOICE_SAFE_MODE = os.getenv("VOICE_SAFE_MODE", "0") == "1"
+VOICE_SAFE_MODE = _env_bool("VOICE_SAFE_MODE", False)
 HOLDY_TINY_CDN = os.getenv("HOLDY_TINY_CDN", "https://call-router-audio-2526.twil.io/holdy_tiny.mp3")
 HOLDY_MID_CDN = os.getenv("HOLDY_MID_CDN", "https://call-router-audio-2526.twil.io/holdy_mid.mp3")
 HOLD_BG_CDN = os.getenv("HOLD_BG_CDN", "")
@@ -5541,18 +5547,15 @@ def handle_gather():
     
     if VOICE_SAFE_MODE:
         vr = VoiceResponse()
-        msg = f"Heard: {speech or digits or 'nothing'}"
-        current_app.logger.info("[SAFE] Responding immediately: %s", msg)
-        vr.say(msg)
+        vr.say(f"Heard: {speech or digits or 'nothing'}")
+        current_app.logger.info("[SAFE] say-only reply (speech=%r digits=%r)", speech, digits)
         return xml_response(vr)
     
-    # Log keys + values
-    current_app.logger.info("[GATHER] keys=%s speech=%r digits=%r conf=%.3f", 
-                           list(form.keys()), speech, digits, conf)
-    
+    # Normal path - store SpeechResult into job and redirect
     if speech or digits:
         # Create/resolve job_id
         job_id = save_state_and_start_async_process(speech, digits)
+        current_app.logger.info("[GATHER] input speech=%r digits=%r -> job=%s", speech, digits, job_id)
         
         vr = VoiceResponse()
         vr.redirect(public_url(f"/result?job={job_id}"), method="POST")
