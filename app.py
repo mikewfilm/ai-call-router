@@ -57,6 +57,7 @@ USE_LOCAL_WHISPER = int(os.getenv("USE_LOCAL_WHISPER", "0"))
 GATHER_SPEECH_SECONDS = int(os.getenv("GATHER_SPEECH_SECONDS", "7"))
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
 USE_FILLER = os.getenv("USE_FILLER", "1") == "1"
+VOICE_SAFE_MODE = os.getenv("VOICE_SAFE_MODE", "0") == "1"
 HOLDY_TINY_CDN = os.getenv("HOLDY_TINY_CDN", "https://call-router-audio-2526.twil.io/holdy_tiny.mp3")
 HOLDY_MID_CDN = os.getenv("HOLDY_MID_CDN", "https://call-router-audio-2526.twil.io/holdy_mid.mp3")
 HOLD_BG_CDN = os.getenv("HOLD_BG_CDN", "")
@@ -4823,6 +4824,8 @@ def result():
         args = request.args or {}
         job = (args.get("job") or "").strip()
         n = int(args.get("n") or "1")
+        
+        current_app.logger.info("[RESULT] job=%s args=%s", request.args.get("job"), dict(request.args))
 
         st = load_state(job) or {}
         ready = bool(st.get("ready"))
@@ -4834,6 +4837,12 @@ def result():
         current_app.logger.exception("[STATE] ERROR in /result job=%s", job)
         # Return a safe response on error
         vr = VoiceResponse()
+        # Check if hold file exists before playing
+        abs_path = os.path.join(app.static_folder, "tts_cache", "holdy_tiny.mp3")
+        if not os.path.exists(abs_path):
+            current_app.logger.error("[AUDIO] Missing hold file: %s", abs_path)
+        else:
+            current_app.logger.info("[AUDIO] Exists: %s", abs_path)
         vr.play(public_url("/static/tts_cache/holdy_tiny.mp3"))
         vr.hangup()
         
@@ -4862,6 +4871,12 @@ def result():
     
     # Else: play hold audio and redirect to poll again
     vr = VoiceResponse()
+    # Check if hold file exists before playing
+    abs_path = os.path.join(app.static_folder, "tts_cache", "holdy_tiny.mp3")
+    if not os.path.exists(abs_path):
+        current_app.logger.error("[AUDIO] Missing hold file: %s", abs_path)
+    else:
+        current_app.logger.info("[AUDIO] Exists: %s", abs_path)
     vr.play(public_url("/static/tts_cache/holdy_tiny.mp3"))
     vr.redirect(public_url(f"/result?job={job}&n={n+1}"), method="POST")
     
@@ -5396,7 +5411,7 @@ def voice_post():
     
     # Log final TwiML if DIAG_TWILIO is enabled
     if DIAG_TWILIO:
-        current_app.logger.info("[TWIML VOICE]\n%s", vr.to_xml())
+        current_app.logger.info("[TWIML /voice]\n%s", vr.to_xml())
     
     return xml_response(vr)
 
@@ -5523,6 +5538,13 @@ def handle_gather():
     speech = form.get("SpeechResult", "").strip()
     digits = form.get("Digits", "").strip()
     conf = float(form.get("Confidence", "0") or 0)
+    
+    if VOICE_SAFE_MODE:
+        vr = VoiceResponse()
+        msg = f"Heard: {speech or digits or 'nothing'}"
+        current_app.logger.info("[SAFE] Responding immediately: %s", msg)
+        vr.say(msg)
+        return xml_response(vr)
     
     # Log keys + values
     current_app.logger.info("[GATHER] keys=%s speech=%r digits=%r conf=%.3f", 
