@@ -40,10 +40,11 @@ if not PUBLIC_BASE:
         if not RB.startswith("http"):
             RB = "https://" + RB
         PUBLIC_BASE = RB.rstrip("/")
-if not PUBLIC_BASE:
-    raise RuntimeError("PUBLIC_BASE is required for Twilio: set it to your public https base (e.g., https://ai-call-router-production.up.railway.app)")
 
 logger.info("[BOOT] PUBLIC_BASE=%s", PUBLIC_BASE)
+
+# Module-level flag for one-time warning
+_BASE_WARNED = False
 
 # ===== CONFIG ORDER + DEFAULTS =====
 # All config flags and constants with safe defaults - defined before ANY route definitions
@@ -160,31 +161,59 @@ def _effective_base() -> str:
 
 def public_url(path_or_url: str) -> str:
     """
-    Always return an absolute HTTPS URL usable by Twilio.
-    Rules:
-      - If already absolute https, return as-is.
-      - Else, join with global PUBLIC_BASE.
-      - Never use request context in background paths.
+    Build a public https URL for Twilio.
+    Preference:
+      1) absolute https as-is,
+      2) PUBLIC_BASE or PUBLIC_HTTP_BASE + normalized path,
+      3) request.url_root (if available) coerced to https,
+      4) soft fallback: upgrade http absolute -> https; else echo original.
+    Never raises; logs a one-time warning if env base is missing.
     """
-    if not path_or_url:
-        raise ValueError("public_url() called with empty path_or_url")
+    try:
+        # 1) Already absolute https?
+        if isinstance(path_or_url, str) and path_or_url.startswith("https://"):
+            return path_or_url
 
-    # Already absolute HTTPS?
-    if re.match(r"^https://", path_or_url):
+        # 2) Env base (preferred)
+        import os
+        base = (os.getenv("PUBLIC_BASE") or os.getenv("PUBLIC_HTTP_BASE") or "").strip()
+        base = base.rstrip("/") if base else ""
+        if base:
+            # ensure single leading slash for the path we append
+            p = path_or_url if path_or_url.startswith("/") else f"/{path_or_url}"
+            # force https on base
+            if base.startswith("http://"):
+                base = "https://" + base[len("http://"):]
+            return f"{base}{p}"
+
+        # 3) Request context fallback
+        try:
+            from flask import request
+            root = (getattr(request, "url_root", "") or "").rstrip("/")
+            if root:
+                # force https on root
+                if root.startswith("http://"):
+                    root = "https://" + root[len("http://"):]
+                p = path_or_url if path_or_url.startswith("/") else f"/{path_or_url}"
+                return f"{root}{p}"
+        except Exception:
+            pass
+
+        # 4) Soft final fallback
+        if isinstance(path_or_url, str) and path_or_url.startswith("http://"):
+            return "https://" + path_or_url[len("http://"):]
         return path_or_url
 
-    # Strip accidental http -> force https
-    if path_or_url.startswith("http://"):
-        path_or_url = "https://" + path_or_url[len("http://"):]
-
-    base = PUBLIC_BASE  # global, guaranteed by boot check
-    if not base:
-        # Safety: should not happen after boot check
-        raise RuntimeError("PUBLIC_BASE not set at runtime")
-
-    if not path_or_url.startswith("/"):
-        return f"{base}/{path_or_url}"
-    return f"{base}{path_or_url}"
+    finally:
+        # Log the one-time warning if no env base was configured
+        # (done in finally so we warn even if early returns happened without envs)
+        import os, logging
+        global _BASE_WARNED
+        if not _BASE_WARNED and not (os.getenv("PUBLIC_BASE") or os.getenv("PUBLIC_HTTP_BASE")):
+            logging.getLogger().warning(
+                "[BOOT] PUBLIC_BASE not set; falling back to request.url_root/echo path."
+            )
+            _BASE_WARNED = True
 
 def sanitize_twiml_xml(xml: str) -> str:
     # make http -> https, and replace any localhost/127.* with PUBLIC_BASE
