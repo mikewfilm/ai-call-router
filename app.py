@@ -4820,15 +4820,12 @@ def result():
     job = None
     try:
         _log_twilio_request("RESULT")
-        from urllib.parse import urlencode
         args = request.args or {}
         job = (args.get("job") or "").strip()
-        n   = int(args.get("n") or "1")
-        t   = args.get("t") or ""
+        n = int(args.get("n") or "1")
 
         st = load_state(job) or {}
         ready = bool(st.get("ready"))
-        phase = st.get("phase", "first_hold")
         
         # Log state for debugging
         current_app.logger.info("[STATE] /result job=%s loaded=%s form=%s args=%s",
@@ -4836,71 +4833,43 @@ def result():
     except Exception as e:
         current_app.logger.exception("[STATE] ERROR in /result job=%s", job)
         # Return a safe response on error
-        tw = VoiceResponse()
-        tw.play(public_url("/static/tts_cache/holdy_tiny.mp3"))
-        return xml_response(tw)
+        vr = VoiceResponse()
+        vr.play(public_url("/static/tts_cache/holdy_tiny.mp3"))
+        vr.hangup()
+        
+        # Log final TwiML if DIAG_TWILIO is enabled
+        if DIAG_TWILIO:
+            current_app.logger.info("[TWIML /result]\n%s", vr.to_xml())
+        
+        return xml_response(vr)
 
-    # Check if we have speech/digits input - if so, never play "no_recording"
+    # Check if we have speech/digits input - if so, NEVER use "no_recording"
     has_input = bool(st.get("speech") or st.get("digits"))
     
-    # Not ready yet: keep the caller on hold and poll again
-    if not ready:
-        # Check for timeout conditions
-        created_at = st.get("created_at", 0)
-        age_seconds = time.time() - created_at if created_at else 0
-        
-        # Limit polls or age - but only play "no_recording" if no input was received
-        if n > 8 or age_seconds > 15:
-            if has_input:
-                # We have input but processing failed - play a friendly message instead of "no_recording"
-                bye = public_url("static/tts_cache/holdy_tiny.mp3")
-                resp = f'<?xml version="1.0" encoding="UTF-8"?><Response><Play>{bye}</Play><Hangup/></Response>'
-                current_app.logger.info("[STATE] /result timeout with input, playing holdy_tiny instead of no_recording")
-            else:
-                # No input received - safe to play "no_recording"
-                bye = public_url("static/tts_cache/no_recording.mp3")
-                resp = f'<?xml version="1.0" encoding="UTF-8"?><Response><Play>{bye}</Play><Hangup/></Response>'
-                current_app.logger.info("[STATE] /result timeout with no input, playing no_recording")
-            app.logger.info(f"[RESULT] Final TwiML: {resp}")
-            return xml_response(resp)
-
-        hold_url = public_url("static/tts_cache/holdy_tiny.mp3")  # ensure this exists
-        next_qs = urlencode({"job": job, "n": n, "t": t})
-        next_url = public_url(f"/result?{next_qs}")
-        resp = (
-            f'<?xml version="1.0" encoding="UTF-8"?><Response>'
-            f'<Play>{hold_url}</Play>'
-            f'<Redirect method="POST">{next_url}</Redirect>'
-            f'</Response>'
-        )
-        app.logger.info(f"[RESULT] Final TwiML: {resp}")
-        return xml_response(resp)
-
-    # Ready: play confirmation audio and re-gather
-    confirm_url = st.get("confirm_url", "")
-    if confirm_url:
-        prompt_url = public_url(confirm_url)
-    elif has_input:
-        # We have input but no confirmation URL - play a friendly message
-        prompt_url = public_url("static/tts_cache/holdy_tiny.mp3")
-        current_app.logger.info("[STATE] /result ready with input but no confirm_url, playing holdy_tiny")
-    else:
-        # No input and no confirmation - safe to play "no_recording"
-        prompt_url = public_url("static/tts_cache/no_recording.mp3")
-
-    # Build the next gather (use your standard defaults helper if you have one)
-    # Make sure speechModel="phone_call" and numeric speechTimeout
-    gather_action = public_url(f"/confirm?job={job}")
-    gather = (
-        f'<Gather input="speech" language="en-US" method="POST" '
-        f'speechModel="phone_call" speechTimeout="7" timeout="5" '
-        f'action="{gather_action}" hints="yes, no, correct, wrong">'
-        f'<Play>{prompt_url}</Play>'
-        f'</Gather>'
-    )
-    resp = f'<?xml version="1.0" encoding="UTF-8"?><Response>{gather}</Response>'
-    app.logger.info(f"[RESULT] Final TwiML: {resp}")
-    return xml_response(resp)
+    # If final text/audio ready: play/say it and Hangup
+    if ready:
+        play_url = st.get("play_url", "")
+        if play_url:
+            vr = VoiceResponse()
+            vr.play(public_url(play_url))
+            vr.hangup()
+            
+            # Log final TwiML if DIAG_TWILIO is enabled
+            if DIAG_TWILIO:
+                current_app.logger.info("[TWIML /result]\n%s", vr.to_xml())
+            
+            return xml_response(vr)
+    
+    # Else: play hold audio and redirect to poll again
+    vr = VoiceResponse()
+    vr.play(public_url("/static/tts_cache/holdy_tiny.mp3"))
+    vr.redirect(public_url(f"/result?job={job}&n={n+1}"), method="POST")
+    
+    # Log final TwiML if DIAG_TWILIO is enabled
+    if DIAG_TWILIO:
+        current_app.logger.info("[TWIML /result]\n%s", vr.to_xml())
+    
+    return xml_response(vr)
 
 
 
@@ -5379,11 +5348,7 @@ def twiml_selftest():
     vr.play(public_url("/static/tts_cache/no_recording.mp3"))
     return app.response_class(response=str(vr), status=200, mimetype="text/xml")
 
-@app.route("/voice", methods=["GET"])
-def voice_get():
-    return "POST /voice only (Twilio webhook)."
-
-@app.route("/voice", methods=["POST"])
+@app.route("/voice", methods=["POST", "GET"])
 def voice_post():
     log_twilio_webhook("VOICE")
     _log_twilio_request("VOICE")
@@ -5409,24 +5374,31 @@ def voice_post():
     greet_url = cached if cached else tts_line_url(greet_text, None, get_base_url())
     print(f"[VOICE] greet_url -> {greet_url} (lang={DEFAULT_LANG}, gather_main={USE_GATHER_MAIN})")
 
-    tw = VoiceResponse()
+    vr = VoiceResponse()
     # Audio sources sanity: honor GREETING_URL env override if present
     greeting_url = os.getenv("GREETING_URL", "")
     if greeting_url.startswith("https://"):
-        tw.play(greeting_url)
+        vr.play(greeting_url)
     else:
-        tw.play(public_url(greet_url))  # your greeting url builder already logs this
-    g = tw.gather(
-        action=public_url("/handle"),
-        method="POST",
+        vr.play(public_url(greet_url))  # your greeting url builder already logs this
+    
+    vr.gather(
         input="speech dtmf",
-        speech_model="phone_call",
-        speech_timeout="3",
-        barge_in=True,
-        profanity_filter=False,
-        action_on_empty_result=True
+        speechModel="phone_call",
+        speechTimeout="3",
+        timeout="3",
+        bargeIn=True,
+        profanityFilter=False,
+        actionOnEmptyResult=True,
+        method="POST",
+        action=public_url("/handle_gather")
     )
-    return xml_response(tw)
+    
+    # Log final TwiML if DIAG_TWILIO is enabled
+    if DIAG_TWILIO:
+        current_app.logger.info("[TWIML /voice]\n%s", vr.to_xml())
+    
+    return xml_response(vr)
 
 # ===== NEW: first utterance Gather handler =====
 def build_confirmation_audio_url(text: str) -> str:
@@ -5546,7 +5518,49 @@ def handle():
 
 @app.post("/handle_gather")
 def handle_gather():
-    return handle()
+    # Extract form data
+    form = request.form
+    speech = form.get("SpeechResult", "").strip()
+    digits = form.get("Digits", "").strip()
+    conf = float(form.get("Confidence", "0") or 0)
+    
+    # Log keys + values
+    current_app.logger.info("[GATHER] keys=%s speech=%r digits=%r conf=%.3f", 
+                           list(form.keys()), speech, digits, conf)
+    
+    if speech or digits:
+        # Create/resolve job_id
+        job_id = save_state_and_start_async_process(speech, digits)
+        
+        vr = VoiceResponse()
+        vr.redirect(public_url(f"/result?job={job_id}"), method="POST")
+        
+        # Log final TwiML if DIAG_TWILIO is enabled
+        if DIAG_TWILIO:
+            current_app.logger.info("[TWIML /handle_gather]\n%s", vr.to_xml())
+        
+        return xml_response(vr)
+    else:
+        # Re-prompt with identical Gather
+        vr = VoiceResponse()
+        vr.play(public_url("/static/tts_cache/reprompt_listening.mp3"))
+        vr.gather(
+            input="speech dtmf",
+            speechModel="phone_call",
+            speechTimeout="3",
+            timeout="3",
+            bargeIn=True,
+            profanityFilter=False,
+            actionOnEmptyResult=True,
+            method="POST",
+            action=public_url("/handle_gather")
+        )
+        
+        # Log final TwiML if DIAG_TWILIO is enabled
+        if DIAG_TWILIO:
+            current_app.logger.info("[TWIML /handle_gather]\n%s", vr.to_xml())
+        
+        return xml_response(vr)
     
 @app.route("/dept_choice", methods=["POST"])
 def dept_choice():
