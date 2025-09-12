@@ -1444,17 +1444,17 @@ def save_state(job_id: str, data: dict, ttl_sec: int = 900):
         current_app.logger.exception("[STATE] ERROR saving job=%s", job_id)
         raise
 
-def load_state(job_id: str) -> Optional[dict]:
+def load_state(job_id: str) -> dict:
     key = f"job:{job_id}"
     try:
         r = get_redis()
         if r:
             js = r.get(key)
-            return json.loads(js) if js else None
-        return _fb_get(key)
+            return json.loads(js) if js else {}
+        return _fb_get(key) or {}
     except Exception as e:
         current_app.logger.exception("[STATE] ERROR loading job=%s", job_id)
-        return None
+        return {}
 
 def update_state(job_id: str, updates: dict, ttl_sec: int = 900) -> dict:
     cur = load_state(job_id) or {}
@@ -4824,72 +4824,49 @@ def _result_poll_url(base_url: str, job_id: str, meta: dict) -> str:
 @app.post("/result")
 def result():
     log_twilio_webhook("RESULT")
-    job = None
-    try:
-        _log_twilio_request("RESULT")
-        args = request.args or {}
-        job = (args.get("job") or "").strip()
-        n = int(args.get("n") or "1")
-        
-        current_app.logger.info("[RESULT] job=%s args=%s", request.args.get("job"), dict(request.args))
+    form = request.form or {}
+    job_id = request.args.get("job") or form.get("job") or "unknown"
+    n = int(request.args.get("n", "0") or 0)
+    t = request.args.get("t", "")
+    state = load_state(job_id) or {}
 
-        st = load_state(job) or {}
-        ready = bool(st.get("ready"))
-        
-        # Log state for debugging
-        current_app.logger.info("[STATE] /result job=%s loaded=%s form=%s args=%s",
-                                job, st, dict(request.form), dict(request.args))
-    except Exception as e:
-        current_app.logger.exception("[STATE] ERROR in /result job=%s", job)
-        # Return a safe response on error
-        vr = VoiceResponse()
-        # Check if hold file exists before playing
-        abs_path = os.path.join(app.static_folder, "tts_cache", "holdy_tiny.mp3")
-        if not os.path.exists(abs_path):
-            current_app.logger.error("[AUDIO] Missing hold file: %s", abs_path)
-        else:
-            current_app.logger.info("[AUDIO] Exists: %s", abs_path)
-        vr.play(public_url("/static/tts_cache/holdy_tiny.mp3"))
-        vr.hangup()
-        
-        # Log final TwiML if DIAG_TWILIO is enabled
-        if DIAG_TWILIO:
-            current_app.logger.info("[TWIML /result]\n%s", vr.to_xml())
-        
+    speech = state.get("speech") or state.get("SpeechResult") or state.get("heard") or ""
+    status = state.get("status", "pending")
+    reply_text = state.get("reply_text", "")
+    reply_audio = state.get("reply_audio") or state.get("play_url", "")  # absolute https if already synthesized
+
+    current_app.logger.info("[RESULT] job=%s n=%d status=%s speech=%r keys=%s", 
+                            job_id, n, status, speech, sorted(state.keys()))
+
+    vr = VoiceResponse()
+
+    # Hard error path
+    if status == "error":
+        err_audio = public_url("/static/tts_cache/no_recording.mp3")
+        vr.play(err_audio)
+        current_app.logger.warning("[RESULT] job=%s error -> play+hangup", job_id)
+        return xml_response(vr)  # let Twilio end after Play (no explicit Hangup)
+
+    # Ready: have audio URL already
+    if reply_audio and reply_audio.startswith("https://"):
+        vr.play(public_url(reply_audio))
+        current_app.logger.info("[RESULT] job=%s ready: reply_audio", job_id)
+        # Optionally loop once more if you expect follow-ups; otherwise return
         return xml_response(vr)
 
-    # Check if we have speech/digits input - if so, NEVER use "no_recording"
-    has_input = bool(st.get("speech") or st.get("digits"))
-    
-    # If final text/audio ready: play/say it and Hangup
-    if ready:
-        play_url = st.get("play_url", "")
-        if play_url:
-            vr = VoiceResponse()
-            vr.play(public_url(play_url))
-            vr.hangup()
-            
-            # Log final TwiML if DIAG_TWILIO is enabled
-            if DIAG_TWILIO:
-                current_app.logger.info("[TWIML /result]\n%s", vr.to_xml())
-            
-            return xml_response(vr)
-    
-    # Else: play hold audio and redirect to poll again
-    vr = VoiceResponse()
-    # Check if hold file exists before playing
-    abs_path = os.path.join(app.static_folder, "tts_cache", "holdy_tiny.mp3")
-    if not os.path.exists(abs_path):
-        current_app.logger.error("[AUDIO] Missing hold file: %s", abs_path)
-    else:
-        current_app.logger.info("[AUDIO] Exists: %s", abs_path)
-    vr.play(public_url("/static/tts_cache/holdy_tiny.mp3"))
-    vr.redirect(public_url(f"/result?job={job}&n={n+1}"), method="POST")
-    
-    # Log final TwiML if DIAG_TWILIO is enabled
-    if DIAG_TWILIO:
-        current_app.logger.info("[TWIML /result]\n%s", vr.to_xml())
-    
+    # Ready: have text, synthesize to cached mp3
+    if reply_text:
+        mp3_url = tts_line_url(reply_text, voice="default")
+        vr.play(public_url(mp3_url))
+        current_app.logger.info("[RESULT] job=%s ready: reply_text -> play", job_id)
+        return xml_response(vr)
+
+    # Not ready yet -> hold + poll again
+    hold = os.getenv("HOLDY_TINY_CDN", "") or public_url("/static/tts_cache/holdy_tiny.mp3")
+    vr.play(hold)
+    next_n = n + 1
+    vr.redirect(public_url(f"/result?job={job_id}&n={next_n}&t={int(time.time())}"), method="POST")
+    current_app.logger.info("[RESULT] job=%s pending -> hold+redirect n=%d", job_id, next_n)
     return xml_response(vr)
 
 
@@ -5472,9 +5449,12 @@ def save_state_and_start_async_process(speech: str, digits: str) -> str:
     job_id = str(uuid.uuid4())
     now_ms = int(time.time() * 1000)
     
-    # initialize state
+    # initialize state with proper structure
     state = {
         "job_id": job_id,
+        "speech": speech,
+        "digits": digits,
+        "status": "pending",
         "phase": "first_hold",
         "ready": False,
         "call_sid": request.values.get("CallSid", ""),
