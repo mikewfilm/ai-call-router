@@ -5396,7 +5396,7 @@ def voice_post():
     
     # Log final TwiML if DIAG_TWILIO is enabled
     if DIAG_TWILIO:
-        current_app.logger.info("[TWIML /voice]\n%s", vr.to_xml())
+        current_app.logger.info("[TWIML VOICE]\n%s", vr.to_xml())
     
     return xml_response(vr)
 
