@@ -171,70 +171,49 @@ def _effective_base() -> str:
 
 def public_url(path_or_url: str) -> str:
     """
-    Build a public https URL for Twilio.
-    Preference:
-      1) absolute https as-is,
-      2) PUBLIC_BASE or PUBLIC_HTTP_BASE + normalized path,
-      3) request.url_root (if available) coerced to https,
-      4) soft fallback: upgrade http absolute -> https; else echo original.
-    Never raises; logs a one-time warning if env base is missing.
+    Build an absolute URL for Twilio. Works both in-request and in background threads.
+    Never shadows the 'os' module; never raises if no request context.
     """
-    try:
-        # 1) Already absolute https?
-        if isinstance(path_or_url, str) and path_or_url.startswith("https://"):
-            return path_or_url
-
-        # If rel already looks absolute or is /static, just join safely
-        if path_or_url.startswith("/static/"):
-            try:
-                from flask import request
-                return f"{request.url_root.rstrip('/')}{path_or_url}"
-            except Exception:
-                base = (os.getenv("PUBLIC_BASE") or os.getenv("PUBLIC_HTTP_BASE") or "").strip()
-                if base:
-                    return f"{base.rstrip('/')}{path_or_url}"
-                return path_or_url
-
-        # 2) Env base (preferred)
-        import os
-        base = (os.getenv("PUBLIC_BASE") or os.getenv("PUBLIC_HTTP_BASE") or "").strip()
-        base = base.rstrip("/") if base else ""
-        if base:
-            # ensure single leading slash for the path we append
-            p = path_or_url if path_or_url.startswith("/") else f"/{path_or_url}"
-            # force https on base
-            if base.startswith("http://"):
-                base = "https://" + base[len("http://"):]
-            return f"{base}{p}"
-
-        # 3) Request context fallback
-        try:
-            from flask import request
-            root = (getattr(request, "url_root", "") or "").rstrip("/")
-            if root:
-                # force https on root
-                if root.startswith("http://"):
-                    root = "https://" + root[len("http://"):]
-                p = path_or_url if path_or_url.startswith("/") else f"/{path_or_url}"
-                return f"{root}{p}"
-        except Exception:
-            pass
-
-        # 4) Soft final fallback
-        if isinstance(path_or_url, str) and path_or_url.startswith("http://"):
-            return "https://" + path_or_url[len("http://"):]
+    if not path_or_url:
         return path_or_url
 
-    finally:
-        # Log the one-time warning if no env base was configured
-        # (done in finally so we warn even if early returns happened without envs)
-        import os, logging
-        global _BASE_WARNED
-        if not _BASE_WARNED and not (os.getenv("PUBLIC_BASE") or os.getenv("PUBLIC_HTTP_BASE")):
-            logging.getLogger().warning(
-                "[BOOT] PUBLIC_BASE not set; falling back to request.url_root/echo path."
-            )
-            _BASE_WARNED = True
+    # Already absolute?
+    if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
+        return path_or_url
+
+    # Make sure it starts with a leading slash
+    if not path_or_url.startswith("/"):
+        path_or_url = "/" + path_or_url
+
+    # Prefer the live request when available
+    try:
+        if has_request_context() and request:
+            return f"{request.url_root.rstrip('/')}{path_or_url}"
+    except Exception:
+        pass
+
+    # Next: environment-provided base(s)
+    base = (os.getenv("PUBLIC_BASE")
+            or os.getenv("PUBLIC_HTTP_BASE")
+            or os.getenv("PUBLIC_BASE_URL")
+            or "").strip().rstrip("/")
+    if base:
+        return f"{base}{path_or_url}"
+
+    # Railway/host fallbacks
+    scheme = os.getenv("PREFERRED_URL_SCHEME", "https").strip() or "https"
+    host = (os.getenv("RAILWAY_PUBLIC_DOMAIN")
+            or os.getenv("RAILWAY_STATIC_URL")
+            or os.getenv("RAILWAY_URL")
+            or os.getenv("HOST")
+            or "").strip()
+    if host:
+        if not host.startswith("http"):
+            host = f"{scheme}://{host}"
+        return f"{host.rstrip('/')}{path_or_url}"
+
+    # Last resort: relative (Twilio may reject; but don't crash)
+    return path_or_url
 
 def sanitize_twiml_xml(xml: str) -> str:
     # make http -> https, and replace any localhost/127.* with PUBLIC_BASE
@@ -1412,7 +1391,6 @@ def build_confirmation_audio_url(filename_or_path: str) -> str:
 from urllib.parse import urljoin
 
 # --- Redis-backed job state with in-proc fallback ---
-import os, json, time
 from typing import Optional
 _redis = None
 _fallback_state = {}  # key -> (expires_ts, json_str)
@@ -6124,7 +6102,6 @@ consent_logger = ConsentLogger()
 # ---------- CONSENT FLOW (drop-in patch) ----------
 from flask import request, make_response, url_for
 from twilio.twiml.voice_response import VoiceResponse, Gather
-import os
 
 CONSENT_URL = os.getenv("CONSENT_URL", "https://consent-service-9381.twil.io/voice-consent")
 
