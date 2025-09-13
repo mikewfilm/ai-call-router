@@ -4886,41 +4886,55 @@ def result():
     st = state_get(job_id)
     status = st.get("status")
     reply_url = st.get("reply_url", "")
-    heard = st.get("heard", "")
 
-    if status == "working":
-        # keep your existing poll (Play hold + Redirect) but cap max polls
-        vr = VoiceResponse()
-        vr.say(f"poll {n}")  # keep for now; optionally remove later
-        vr.pause(length=1)
-        if n >= 5:
-            vr.say("Still working… please call back shortly.")
+    vr = VoiceResponse()
+
+    # MISSING state: re-gather
+    if not st or not status:
+        current_app.logger.info("[RESULT] missing job=%s n=%d", job_id, n)
+        # Play greeting and gather
+        greet_url = public_url("/static/tts_cache/1a99e9963544b45c.mp3")  # or your greeting
+        vr.play(greet_url)
+        vr.gather(
+            action=public_url("/handle_gather"),
+            method="POST",
+            input="speech dtmf",
+            speech_model="phone_call",
+            speech_timeout="5",
+            timeout="5",
+            barge_in=True,
+            profanity_filter=False,
+            action_on_empty_result=True
+        )
+        return xml_response(vr)
+
+    # PENDING state: poll with hold audio
+    if status == "working" or not reply_url:
+        current_app.logger.info("[RESULT] pending job=%s n=%d reply_url=%s", job_id, n, reply_url)
+        
+        # Cap polling at MAX_RESULT_POLLS
+        if n >= MAX_RESULT_POLLS:
+            vr.say("Still working, please call back shortly.")
+            vr.hangup()
             return xml_response(vr)
+        
+        # Play hold audio and redirect
+        hold_url = HOLDY_MID_CDN or public_url("/static/tts_cache/holdy_tiny.mp3")
+        vr.play(hold_url)
         vr.redirect(public_url(f"/result?job={job_id}&n={n+1}&t={int(time.time())}"), method="POST")
         return xml_response(vr)
 
-    # DONE path: play the model reply and immediately re-prompt the caller
-    vr = VoiceResponse()
-    audio = _abs_audio(reply_url or "")
-    current_app.logger.info("[RESULT] DONE job=%s heard=%r reply_url=%s", job_id, heard, audio)
-    if audio:
-        vr.play(audio)
-    else:
-        # ultra-safe fallback
-        vr.say(f"You said: {heard or 'something'}")
+    # DONE state: play reply and hangup
+    if status == "done" and reply_url:
+        current_app.logger.info("[RESULT] done job=%s n=%d reply_url=%s", job_id, n, reply_url)
+        vr.play(reply_url)
+        vr.hangup()
+        return xml_response(vr)
 
-    # now gather next input instead of hanging up
-    vr.gather(
-        action=public_url("/handle_gather"),
-        method="POST",
-        input="speech dtmf",
-        speech_model="phone_call",
-        speech_timeout=str(GATHER_TIMEOUT),
-        timeout=str(GATHER_TIMEOUT),
-        barge_in=True,
-        profanity_filter=False,
-        action_on_empty_result=True
-    )
+    # Fallback: should not reach here
+    current_app.logger.warning("[RESULT] unknown state job=%s status=%s", job_id, status)
+    vr.say("Sorry, something went wrong.")
+    vr.hangup()
     return xml_response(vr)
 
 
