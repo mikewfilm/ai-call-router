@@ -4899,12 +4899,6 @@ def result():
         vr.redirect(public_url(f"/result?job={job_id}&n={n+1}&t={int(time.time())}"), method="POST")
         return xml_response(vr)
 
-    if status == "error":
-        vr = VoiceResponse()
-        vr.say("We hit a snag. Please try again shortly.")
-        vr.hangup()
-        return xml_response(vr)
-
     # DONE path: play the model reply and immediately re-prompt the caller
     vr = VoiceResponse()
     audio = _abs_audio(reply_url or "")
