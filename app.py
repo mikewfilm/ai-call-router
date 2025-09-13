@@ -64,6 +64,8 @@ GATHER_SPEECH_SECONDS = int(os.getenv("GATHER_SPEECH_SECONDS", "7"))
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
 USE_FILLER = os.getenv("USE_FILLER", "1") == "1"
 VOICE_SAFE_MODE = _env_bool("VOICE_SAFE_MODE", False)
+DEBUG_RESULT_SAY = _env_bool("DEBUG_RESULT_SAY", False)   # when true, /result speaks its poll count
+MAX_RESULT_POLLS = int(os.getenv("MAX_RESULT_POLLS", "8")) # hard cap on redirects
 HOLDY_TINY_CDN = os.getenv("HOLDY_TINY_CDN", "https://call-router-audio-2526.twil.io/holdy_tiny.mp3")
 HOLDY_MID_CDN = os.getenv("HOLDY_MID_CDN", "https://call-router-audio-2526.twil.io/holdy_mid.mp3")
 HOLD_BG_CDN = os.getenv("HOLD_BG_CDN", "")
@@ -4832,11 +4834,20 @@ def _result_poll_url(base_url: str, job_id: str, meta: dict) -> str:
 @app.post("/result")
 def result():
     log_twilio_webhook("RESULT")
-    job_id = request.args.get("job") or request.form.get("job") or ""
-    n = int(request.args.get("n", 0) or request.form.get("n", 0) or 0)
+    n = int(request.args.get("n", "0") or 0)
+    job_id = request.args.get("job", "").strip()
+    t = request.args.get("t", "")
+
+    current_app.logger.info("[RESULT] job=%s n=%d t=%s", job_id, n, t)
+
+    vr = VoiceResponse()
+
+    # Cap the loop
+    if n >= MAX_RESULT_POLLS:
+        vr.say("Still working. Please call back shortly.")
+        return xml_response(vr)
 
     if not job_id:
-        vr = VoiceResponse()
         vr.say("Sorry, missing job identifier.")
         return xml_response(vr)
 
@@ -4846,20 +4857,25 @@ def result():
     status = st.get("status", "pending")
     tts_url = st.get("tts_url", "")
 
-    vr = VoiceResponse()
-
     if status == "ready" and tts_url:
         # PLAY THE READY AUDIO and stop polling
         vr.play(tts_url)
         current_app.logger.info("[RESULT] job=%s READY -> play %s", job_id, tts_url)
         return xml_response(vr)
 
-    # pending (or missing fields) -> smoother hold + poll again
-    hold = HOLDY_MID_CDN or public_url("/static/tts_cache/holdy_mid.mp3")
-    vr.play(hold)
+    # If debugging, speak the poll number so we can hear progress for real calls
+    if DEBUG_RESULT_SAY:
+        vr.say(f"poll {n}")
+        # short pause so we hear a syllable before redirecting
+        vr.pause(length=1)
+        vr.redirect(public_url(f"/result?job={job_id}&n={n+1}&t={int(time.time())}"), method="POST")
+        return xml_response(vr)
+
+    # Normal path (existing): play hold, then redirect quickly
+    hold_url = HOLDY_MID_CDN or public_url("/static/tts_cache/holdy_mid.mp3")
+    vr.play(hold_url)
     vr.pause(length=1)
     vr.redirect(public_url(f"/result?job={job_id}&n={n+1}&t={int(time.time())}"), method="POST")
-    current_app.logger.info("[RESULT] job=%s PENDING -> n=%d", job_id, n+1)
     return xml_response(vr)
 
 
@@ -5548,6 +5564,7 @@ def handle_gather():
     if speech or digits:
         # Create/resolve job_id
         job_id = save_state_and_start_async_process(speech, digits)
+        current_app.logger.info("[GATHER->RESULT] speech=%r digits=%r -> job=%s", speech, digits, job_id)
         _state_debug(job_id, "after gather")
         vr = VoiceResponse()
         vr.redirect(public_url(f"/result?job={job_id}"), method="POST")
