@@ -1491,6 +1491,15 @@ def state_set(job_id: str, data: dict, ttl=900):
         return
     r.setex(state_key(job_id), ttl, json.dumps(data))
 
+def _abs_audio(url_or_path: str) -> str:
+    # If already absolute https, return as-is; otherwise route through public_url
+    if url_or_path.startswith("https://"):
+        return url_or_path
+    # common case: we stored just a filename like 'ccc7f39....mp3'
+    if not url_or_path.startswith("/"):
+        url_or_path = f"/static/tts_cache/{url_or_path}"
+    return public_url(url_or_path)
+
 def static_file_url(relpath: str) -> str:
     rel = (relpath or "").lstrip("/")
     if rel.startswith("static/"):
@@ -4869,37 +4878,55 @@ def _result_poll_url(base_url: str, job_id: str, meta: dict) -> str:
     return public_url(f"/result?job={job_id}&n={cnt}&t={int(time.time()*1000)}")
 
 @app.post("/result")
-def result_post():
+def result():
     job_id = request.args.get("job", "") or request.form.get("job", "")
     n = int(request.args.get("n", "0") or 0)
-    vr = VoiceResponse()
+    t = request.args.get("t", "")
 
     st = state_get(job_id)
     status = st.get("status")
+    reply_url = st.get("reply_url", "")
+    heard = st.get("heard", "")
 
-    if status == "done" and st.get("reply_url"):
-        vr.play(st["reply_url"])
-        vr.hangup()
+    if status == "working":
+        # keep your existing poll (Play hold + Redirect) but cap max polls
+        vr = VoiceResponse()
+        vr.say(f"poll {n}")  # keep for now; optionally remove later
+        vr.pause(length=1)
+        if n >= 5:
+            vr.say("Still working… please call back shortly.")
+            return xml_response(vr)
+        vr.redirect(public_url(f"/result?job={job_id}&n={n+1}&t={int(time.time())}"), method="POST")
         return xml_response(vr)
 
     if status == "error":
+        vr = VoiceResponse()
         vr.say("We hit a snag. Please try again shortly.")
         vr.hangup()
         return xml_response(vr)
 
-    # not ready yet
-    if n >= 5:
-        # final graceful exit
-        vr.say("Still working. Please call back shortly.")
-        vr.hangup()
-        return xml_response(vr)
+    # DONE path: play the model reply and immediately re-prompt the caller
+    vr = VoiceResponse()
+    audio = _abs_audio(reply_url or "")
+    current_app.logger.info("[RESULT] DONE job=%s heard=%r reply_url=%s", job_id, heard, audio)
+    if audio:
+        vr.play(audio)
+    else:
+        # ultra-safe fallback
+        vr.say(f"You said: {heard or 'something'}")
 
-    hold = (os.getenv("HOLDY_MID_CDN")
-            or os.getenv("HOLDY_TINY_CDN")
-            or public_url("/static/tts_cache/holdy_tiny.mp3"))
-    vr.play(hold)
-    vr.pause(length=1)
-    vr.redirect(public_url(f"/result?job={job_id}&n={n+1}&t={int(time.time())}"), method="POST")
+    # now gather next input instead of hanging up
+    vr.gather(
+        action=public_url("/handle_gather"),
+        method="POST",
+        input="speech dtmf",
+        speech_model="phone_call",
+        speech_timeout=str(GATHER_TIMEOUT),
+        timeout=str(GATHER_TIMEOUT),
+        barge_in=True,
+        profanity_filter=False,
+        action_on_empty_result=True
+    )
     return xml_response(vr)
 
 
