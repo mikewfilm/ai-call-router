@@ -56,6 +56,8 @@ def _env_bool(name: str, default=False):
 # ===== CONFIG ORDER + DEFAULTS =====
 # All config flags and constants with safe defaults - defined before ANY route definitions
 GATHER_TIMEOUT = int(os.getenv("GATHER_TIMEOUT", "5"))
+GATHER_SPEECH_TIMEOUT = int(os.getenv("GATHER_SPEECH_TIMEOUT", "3"))
+GATHER_ENHANCED = os.getenv("GATHER_ENHANCED", "false").lower() in ("true", "1", "yes")
 GATHER_MAX_ATTEMPTS = int(os.getenv("GATHER_MAX_ATTEMPTS", "3"))
 GATHER_MAX_SECONDS = int(os.getenv("GATHER_MAX_SECONDS", "45"))
 GATHER_HINTS = os.getenv("GATHER_HINTS", "bananas, pharmacy, prescriptions, coupons, produce, deli, bakery, customer service")
