@@ -1469,6 +1469,14 @@ def clear_state(job_id: str):
         r.delete(key)
     _fb_del(key)
 
+def _state_debug(job_id, where):
+    try:
+        st = load_state(job_id)  # whatever you currently use to read state
+    except Exception as e:
+        current_app.logger.warning("[STATE] %s job=%s -> READ ERROR: %s", where, job_id, e)
+        return
+    current_app.logger.info("[STATE] %s job=%s -> %s", where, job_id, st)
+
 def static_file_url(relpath: str) -> str:
     rel = (relpath or "").lstrip("/")
     if rel.startswith("static/"):
@@ -4824,57 +4832,34 @@ def _result_poll_url(base_url: str, job_id: str, meta: dict) -> str:
 @app.post("/result")
 def result():
     log_twilio_webhook("RESULT")
-    form = request.form or {}
-    job_id = request.args.get("job") or form.get("job") or "unknown"
-    n = int(request.args.get("n", "0") or 0)
-    t = request.args.get("t", "")
-    state = load_state(job_id) or {}
+    job_id = request.args.get("job") or request.form.get("job") or ""
+    n = int(request.args.get("n", 0) or request.form.get("n", 0) or 0)
 
-    speech = state.get("speech") or state.get("SpeechResult") or state.get("heard") or ""
-    status = state.get("status", "pending")
-    reply_text = state.get("reply_text", "")
-    reply_audio = state.get("reply_audio") or state.get("play_url", "")  # absolute https if already synthesized
+    if not job_id:
+        vr = VoiceResponse()
+        vr.say("Sorry, missing job identifier.")
+        return xml_response(vr)
 
-    current_app.logger.info("[RESULT] job=%s n=%d status=%s speech=%r keys=%s", 
-                            job_id, n, status, speech, sorted(state.keys()))
+    _state_debug(job_id, f"poll n={n}")
+
+    st = load_state(job_id) or {}
+    status = st.get("status", "pending")
+    tts_url = st.get("tts_url", "")
 
     vr = VoiceResponse()
 
-    # Hard error path
-    if status == "error":
-        err_audio = public_url("/static/tts_cache/no_recording.mp3")
-        vr.play(err_audio)
-        current_app.logger.warning("[RESULT] job=%s error -> play+hangup", job_id)
-        return xml_response(vr)  # let Twilio end after Play (no explicit Hangup)
-
-    # Ready: have audio URL already
-    if reply_audio and reply_audio.startswith("https://"):
-        vr.play(public_url(reply_audio))
-        current_app.logger.info("[RESULT] job=%s ready: reply_audio", job_id)
-        # Optionally loop once more if you expect follow-ups; otherwise return
+    if status == "ready" and tts_url:
+        # PLAY THE READY AUDIO and stop polling
+        vr.play(tts_url)
+        current_app.logger.info("[RESULT] job=%s READY -> play %s", job_id, tts_url)
         return xml_response(vr)
 
-    # Ready: have text, synthesize to cached mp3
-    if reply_text:
-        mp3_url = tts_line_url(reply_text, voice="default")
-        vr.play(public_url(mp3_url))
-        current_app.logger.info("[RESULT] job=%s ready: reply_text -> play", job_id)
-        return xml_response(vr)
-
-    # Not ready yet -> smoother hold + poll again
+    # pending (or missing fields) -> smoother hold + poll again
     hold = HOLDY_MID_CDN or public_url("/static/tts_cache/holdy_mid.mp3")
-    vr.play(hold)                     # ~2–3s clip, smoother than "tiny"
-    vr.pause(length=1)                # softens edge before the redirect
-
-    next_n = n + 1
-    vr.redirect(
-        public_url(f"/result?job={job_id}&n={next_n}&t={int(time.time())}"),
-        method="POST"
-    )
-    current_app.logger.info(
-        "[RESULT] job=%s pending -> hold_mid+pause+redirect n=%d",
-        job_id, next_n
-    )
+    vr.play(hold)
+    vr.pause(length=1)
+    vr.redirect(public_url(f"/result?job={job_id}&n={n+1}&t={int(time.time())}"), method="POST")
+    current_app.logger.info("[RESULT] job=%s PENDING -> n=%d", job_id, n+1)
     return xml_response(vr)
 
 
@@ -5458,21 +5443,41 @@ def save_state_and_start_async_process(speech: str, digits: str) -> str:
     now_ms = int(time.time() * 1000)
     
     # initialize state with proper structure
-    state = {
+    payload = {
         "job_id": job_id,
-        "speech": speech,
-        "digits": digits,
+        "speech": speech or "",
+        "digits": digits or "",
         "status": "pending",
+        "created": time.time(),
         "phase": "first_hold",
         "ready": False,
         "call_sid": request.values.get("CallSid", ""),
         "heard": speech or digits,
         "created_ms": now_ms,
+        # fields the result poller expects when ready:
+        # "tts_url": "", "ready_text": ""
     }
-    save_state(job_id, state)
-    
-    # start async processing
-    start_async_processing(job_id, speech or digits)
+    save_state(job_id, payload)
+    current_app.logger.info("[STATE] created job=%s speech=%r digits=%r", job_id, speech, digits)
+
+    # TEMP FAST-PATH: immediately synthesize an echo mp3 and mark ready.
+    try:
+        echo_text = f"You said: {speech or digits or 'nothing'}."
+        url = tts_line_url(echo_text)  # your existing function that returns a PUBLIC URL
+        payload.update({
+            "status": "ready",
+            "ready_text": echo_text,
+            "tts_url": url,
+            "ready_at": time.time(),
+        })
+        save_state(job_id, payload)
+        current_app.logger.info("[STATE] FAST-READY job=%s url=%s", job_id, url)
+    except Exception as e:
+        current_app.logger.exception("[STATE] FAST-READY failed job=%s: %s", job_id, e)
+
+    # keep your real async thread-start under a feature flag so it can still run:
+    if _env_bool("ASYNC_REAL_WORK", True):
+        start_async_processing(job_id, speech or digits)
     
     return job_id
 
@@ -5543,8 +5548,7 @@ def handle_gather():
     if speech or digits:
         # Create/resolve job_id
         job_id = save_state_and_start_async_process(speech, digits)
-        current_app.logger.info("[GATHER] input speech=%r digits=%r -> job=%s", speech, digits, job_id)
-        
+        _state_debug(job_id, "after gather")
         vr = VoiceResponse()
         vr.redirect(public_url(f"/result?job={job_id}"), method="POST")
         
