@@ -3493,6 +3493,15 @@ Text: {clean_phrase}"""
 # ============================================
 
 JOBS = {}
+JOBS_LOCK = threading.Lock()
+
+def _job_set(job_id, **kv):
+    with JOBS_LOCK:
+        JOBS[job_id] = {**JOBS.get(job_id, {}), **kv}
+
+def _job_get(job_id):
+    with JOBS_LOCK:
+        return dict(JOBS.get(job_id, {}))
 
 # Tracks job_ids that already got the initial tiny chirp during the "no meta" race.
 INITIAL_CHIRPED = set()
@@ -4396,7 +4405,10 @@ def home():
 @app.get("/state")
 def state_debug():
     job_id = request.args.get("job","")
-    return (state_get(job_id) or {"status":"missing"}), 200, {"Content-Type":"application/json"}
+    state = _job_get(job_id)
+    if not state:
+        return {"status":"missing"}, 200, {"Content-Type":"application/json"}
+    return state, 200, {"Content-Type":"application/json"}
 
 # Serve cached TTS files directly with correct MIME and caching
 @app.route("/static/tts_cache/<path:fname>")
@@ -4881,19 +4893,21 @@ def _result_poll_url(base_url: str, job_id: str, meta: dict) -> str:
 def result():
     job_id = request.args.get("job", "") or request.form.get("job", "")
     n = int(request.args.get("n", "0") or 0)
-    t = request.args.get("t", "")
+    now = int(time.time())
 
-    st = state_get(job_id)
-    status = st.get("status")
-    reply_url = st.get("reply_url", "")
+    # Use in-memory JOBS store for reliable state
+    state = _job_get(job_id)
+    status = state.get("status", "")
+    reply_url = state.get("reply_url", "")
 
-    vr = VoiceResponse()
+    current_app.logger.info("[RESULT] job=%s n=%d status=%s reply_url=%s", job_id, n, status, reply_url)
 
     # MISSING state: re-gather
-    if not st or not status:
+    if not state or not status:
         current_app.logger.info("[RESULT] missing job=%s n=%d", job_id, n)
+        vr = VoiceResponse()
         # Play greeting and gather
-        greet_url = public_url("/static/tts_cache/1a99e9963544b45c.mp3")  # or your greeting
+        greet_url = public_url("/static/tts_cache/1a99e9963544b45c.mp3")
         vr.play(greet_url)
         vr.gather(
             action=public_url("/handle_gather"),
@@ -4909,30 +4923,42 @@ def result():
         return xml_response(vr)
 
     # PENDING state: poll with hold audio
-    if status == "working" or not reply_url:
-        current_app.logger.info("[RESULT] pending job=%s n=%d reply_url=%s", job_id, n, reply_url)
+    if status in {"working", ""} or not reply_url:
+        current_app.logger.info("[RESULT] pending job=%s n=%d", job_id, n)
         
-        # Cap polling at MAX_RESULT_POLLS
-        if n >= MAX_RESULT_POLLS:
-            vr.say("Still working, please call back shortly.")
-            vr.hangup()
+        # Cap retries at 5
+        if n >= 5:
+            vr = VoiceResponse()
+            vr.say("Still working. Please call back shortly.")
             return xml_response(vr)
-        
-        # Play hold audio and redirect
-        hold_url = HOLDY_MID_CDN or public_url("/static/tts_cache/holdy_tiny.mp3")
-        vr.play(hold_url)
-        vr.redirect(public_url(f"/result?job={job_id}&n={n+1}&t={int(time.time())}"), method="POST")
-        return xml_response(vr)
+        else:
+            vr = VoiceResponse()
+            # Short hold clip (prefer Twilio CDN)
+            hold_url = os.getenv("HOLDY_MID_CDN", "https://call-router-audio-2526.twil.io/holdy_mid.mp3")
+            vr.play(hold_url)
+            vr.redirect(public_url(f"/result?job={job_id}&n={n+1}&t={now}"), method="POST")
+            return xml_response(vr)
 
     # DONE state: play reply and hangup
-    if status == "done" and reply_url:
+    if status == "done":
         current_app.logger.info("[RESULT] done job=%s n=%d reply_url=%s", job_id, n, reply_url)
+        vr = VoiceResponse()
         vr.play(reply_url)
+        # SINGLE TURN: hang up to prove pipeline works
+        vr.hangup()
+        return xml_response(vr)
+
+    # ERROR state
+    if status == "error":
+        current_app.logger.info("[RESULT] error job=%s n=%d", job_id, n)
+        vr = VoiceResponse()
+        vr.say("We hit a snag.")
         vr.hangup()
         return xml_response(vr)
 
     # Fallback: should not reach here
     current_app.logger.warning("[RESULT] unknown state job=%s status=%s", job_id, status)
+    vr = VoiceResponse()
     vr.say("Sorry, something went wrong.")
     vr.hangup()
     return xml_response(vr)
@@ -5480,57 +5506,45 @@ def build_confirmation_audio_url(text: str) -> str:
         # Ultimate fallback
         return public_url("static/tts_cache/no_recording.mp3")
 
+def _work(job_id: str, speech: str, digits: str):
+    from flask import current_app
+    app = current_app._get_current_object()
+    with app.app_context():
+        try:
+            current_app.logger.info("[WORK] starting job=%s speech=%r digits=%r", job_id, speech, digits)
+            
+            # Do the work: build reply text and generate TTS
+            text = speech or digits or "nothing"
+            reply_text = f"You said: {text}."
+            
+            # Generate TTS URL (this may need app context)
+            reply_url = tts_line_url(reply_text) or public_url("/static/tts_cache/holdy_tiny.mp3")
+            
+            # Mark as done in both stores
+            _job_set(job_id, status="done", reply_url=reply_url)
+            state_set(job_id, {"status": "done", "heard": text, "reply_url": reply_url})
+            
+            current_app.logger.info("[WORK] completed job=%s reply_url=%s", job_id, reply_url)
+        except Exception as e:
+            current_app.logger.exception("[STATE] ERROR in async processing job=%s", job_id)
+            _job_set(job_id, status="error")
+            state_set(job_id, {"status": "error", "error": str(e)})
+
 def start_async_processing(job_id: str, text: str):
-    def _work():
-        with app.app_context():
-            try:
-                # Update status to processing
-                update_state(job_id, {"status": "processing", "last_update": time.time()})
-                
-                # TODO: call your existing routing/LLM/TTS and produce a final mp3 URL reachable by Twilio
-                final_url = build_confirmation_audio_url(text)  # use your existing function; if not present, create it to return /static/tts_cache/...mp3
-                
-                # Update with completion
-                update_state(job_id, {
-                    "status": "done", 
-                    "ready": True, 
-                    "play_url": final_url,
-                    "answer_text": f"Got it: {text}",
-                    "last_update": time.time()
-                })
-                logger.info("[STATE] async processing completed job=%s", job_id)
-            except Exception as e:
-                logger.exception("[STATE] ERROR in async processing job=%s", job_id)
-                # extreme fallback: safe mp3 that exists
-                fallback = public_url("static/tts_cache/holdy_tiny.mp3")
-                update_state(job_id, {
-                    "status": "error", 
-                    "ready": True, 
-                    "play_url": fallback,
-                    "last_update": time.time()
-                })
-    threading.Thread(target=_work, daemon=True).start()
+    # This function is kept for compatibility but now uses the new _work
+    threading.Thread(target=_work, args=(job_id, text, ""), daemon=True).start()
 
 def save_state_and_start_async_process(speech: str, digits: str) -> str:
     text = (speech or digits or "").strip()
     job_id = str(uuid.uuid4())
 
-    # initial state
+    # Immediately mark job as working in both stores
+    _job_set(job_id, status="working", heard=text)
     state_set(job_id, {"status": "working", "heard": text})
+    
+    current_app.logger.info("[JOB] created job=%s heard=%r", job_id, text)
 
-    def _worker(jid: str, utter: str):
-        try:
-            # tiny think time to simulate work
-            time.sleep(0.5)
-            # build reply line + turn it into a public MP3 url
-            say = f"You said: {utter or 'nothing'}."
-            mp3_url = tts_line_url(say) or public_url("/static/tts_cache/holdy_tiny.mp3")
-            state_set(jid, {"status": "done", "heard": utter, "reply_url": mp3_url})
-        except Exception as e:
-            current_app.logger.exception("[JOB] worker failed for %s: %s", jid, e)
-            state_set(jid, {"status": "error", "error": str(e)})
-
-    threading.Thread(target=_worker, args=(job_id, text), daemon=True).start()
+    threading.Thread(target=_work, args=(job_id, speech, digits), daemon=True).start()
     return job_id
 
 @app.post("/handle")
