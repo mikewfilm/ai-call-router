@@ -12,7 +12,8 @@ import traceback
 import re
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from flask import Flask, request, Response, url_for, has_request_context, render_template, jsonify, redirect, current_app, make_response
+from flask import Flask, request, Response, url_for, has_request_context, render_template, jsonify, redirect, current_app, make_response, send_from_directory
+import mimetypes
 import requests
 from collections import defaultdict
 import base64
@@ -67,8 +68,8 @@ VOICE_SAFE_MODE = _env_bool("VOICE_SAFE_MODE", False)
 DEBUG_RESULT_SAY = _env_bool("DEBUG_RESULT_SAY", False)   # when true, /result speaks its poll count
 MAX_RESULT_POLLS = int(os.getenv("MAX_RESULT_POLLS", "8")) # hard cap on redirects
 HOLDY_TINY_CDN = os.getenv("HOLDY_TINY_CDN", "https://call-router-audio-2526.twil.io/holdy_tiny.mp3")
-HOLDY_MID_CDN = os.getenv("HOLDY_MID_CDN", "https://call-router-audio-2526.twil.io/holdy_mid.mp3")
-HOLD_BG_CDN = os.getenv("HOLD_BG_CDN", "")
+HOLDY_MID_CDN  = os.getenv("HOLDY_MID_CDN",  "https://call-router-audio-2526.twil.io/holdy_mid.mp3")
+HOLD_BG_CDN    = os.getenv("HOLD_BG_CDN",    "")
 HOLDY_CLARIFY_CDN = os.getenv("HOLDY_CLARIFY_CDN", "https://call-router-audio-2526.twil.io/holdy_clarify.mp3")
 CALL_TIMEOUT_SECONDS = int(os.getenv("CALL_TIMEOUT_SECONDS", "300"))
 POLL_PAUSE = int(os.getenv("POLL_PAUSE", "2"))
@@ -182,6 +183,17 @@ def public_url(path_or_url: str) -> str:
         # 1) Already absolute https?
         if isinstance(path_or_url, str) and path_or_url.startswith("https://"):
             return path_or_url
+
+        # If rel already looks absolute or is /static, just join safely
+        if path_or_url.startswith("/static/"):
+            try:
+                from flask import request
+                return f"{request.url_root.rstrip('/')}{path_or_url}"
+            except Exception:
+                base = (os.getenv("PUBLIC_BASE") or os.getenv("PUBLIC_HTTP_BASE") or "").strip()
+                if base:
+                    return f"{base.rstrip('/')}{path_or_url}"
+                return path_or_url
 
         # 2) Env base (preferred)
         import os
@@ -4372,7 +4384,27 @@ def prepare_final_route(job_id: str, base_url: str, confirmed_text: str):
 def home():
     return "Flask is running and reachable."
 
+# Serve cached TTS files directly with correct MIME and caching
+@app.route("/static/tts_cache/<path:fname>")
+def serve_tts_cache(fname):
+    cache_dir = os.path.join(app.root_path, "static", "tts_cache")
+    full = os.path.join(cache_dir, fname)
+    if not os.path.isfile(full):
+        # return a plain 404, NOT TwiML
+        resp = make_response(b"Not found", 404)
+        resp.headers["Content-Type"] = "text/plain; charset=utf-8"
+        return resp
 
+    # Guess MIME (fallback to audio/mpeg)
+    mime, _ = mimetypes.guess_type(full)
+    if not mime:
+        mime = "audio/mpeg"
+
+    resp = make_response(send_from_directory(cache_dir, fname, conditional=True))
+    resp.headers["Content-Type"] = mime
+    # Allow Twilio to cache between polls
+    resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return resp
 
 @app.route("/pharmacy_followup", methods=["GET", "POST"])
 def pharmacy_followup():
