@@ -1469,6 +1469,28 @@ def _state_debug(job_id, where):
         return
     current_app.logger.info("[STATE] %s job=%s -> %s", where, job_id, st)
 
+# Simple Redis helpers for deterministic job lifecycle
+def state_key(job_id: str) -> str:
+    return f"job:{job_id}"
+
+def state_get(job_id: str) -> dict:
+    r = get_redis()
+    if not r:
+        return {}
+    raw = r.get(state_key(job_id))
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+def state_set(job_id: str, data: dict, ttl=900):
+    r = get_redis()
+    if not r:
+        return
+    r.setex(state_key(job_id), ttl, json.dumps(data))
+
 def static_file_url(relpath: str) -> str:
     rel = (relpath or "").lstrip("/")
     if rel.startswith("static/"):
@@ -4362,6 +4384,11 @@ def prepare_final_route(job_id: str, base_url: str, confirmed_text: str):
 def home():
     return "Flask is running and reachable."
 
+@app.get("/state")
+def state_debug():
+    job_id = request.args.get("job","")
+    return (state_get(job_id) or {"status":"missing"}), 200, {"Content-Type":"application/json"}
+
 # Serve cached TTS files directly with correct MIME and caching
 @app.route("/static/tts_cache/<path:fname>")
 def serve_tts_cache(fname):
@@ -4842,48 +4869,35 @@ def _result_poll_url(base_url: str, job_id: str, meta: dict) -> str:
     return public_url(f"/result?job={job_id}&n={cnt}&t={int(time.time()*1000)}")
 
 @app.post("/result")
-def result():
-    log_twilio_webhook("RESULT")
+def result_post():
+    job_id = request.args.get("job", "") or request.form.get("job", "")
     n = int(request.args.get("n", "0") or 0)
-    job_id = request.args.get("job", "").strip()
-    t = request.args.get("t", "")
-
-    current_app.logger.info("[RESULT] job=%s n=%d t=%s", job_id, n, t)
-
     vr = VoiceResponse()
 
-    # Cap the loop
-    if n >= MAX_RESULT_POLLS:
+    st = state_get(job_id)
+    status = st.get("status")
+
+    if status == "done" and st.get("reply_url"):
+        vr.play(st["reply_url"])
+        vr.hangup()
+        return xml_response(vr)
+
+    if status == "error":
+        vr.say("We hit a snag. Please try again shortly.")
+        vr.hangup()
+        return xml_response(vr)
+
+    # not ready yet
+    if n >= 5:
+        # final graceful exit
         vr.say("Still working. Please call back shortly.")
+        vr.hangup()
         return xml_response(vr)
 
-    if not job_id:
-        vr.say("Sorry, missing job identifier.")
-        return xml_response(vr)
-
-    _state_debug(job_id, f"poll n={n}")
-
-    st = load_state(job_id) or {}
-    status = st.get("status", "pending")
-    tts_url = st.get("tts_url", "")
-
-    if status == "ready" and tts_url:
-        # PLAY THE READY AUDIO and stop polling
-        vr.play(tts_url)
-        current_app.logger.info("[RESULT] job=%s READY -> play %s", job_id, tts_url)
-        return xml_response(vr)
-
-    # If debugging, speak the poll number so we can hear progress for real calls
-    if DEBUG_RESULT_SAY:
-        vr.say(f"poll {n}")
-        # short pause so we hear a syllable before redirecting
-        vr.pause(length=1)
-        vr.redirect(public_url(f"/result?job={job_id}&n={n+1}&t={int(time.time())}"), method="POST")
-        return xml_response(vr)
-
-    # Normal path (existing): play hold, then redirect quickly
-    hold_url = HOLDY_MID_CDN or public_url("/static/tts_cache/holdy_mid.mp3")
-    vr.play(hold_url)
+    hold = (os.getenv("HOLDY_MID_CDN")
+            or os.getenv("HOLDY_TINY_CDN")
+            or public_url("/static/tts_cache/holdy_tiny.mp3"))
+    vr.play(hold)
     vr.pause(length=1)
     vr.redirect(public_url(f"/result?job={job_id}&n={n+1}&t={int(time.time())}"), method="POST")
     return xml_response(vr)
@@ -5463,48 +5477,25 @@ def start_async_processing(job_id: str, text: str):
     threading.Thread(target=_work, daemon=True).start()
 
 def save_state_and_start_async_process(speech: str, digits: str) -> str:
-    """Save state and start async processing, return job_id"""
-    import uuid, time
+    text = (speech or digits or "").strip()
     job_id = str(uuid.uuid4())
-    now_ms = int(time.time() * 1000)
-    
-    # initialize state with proper structure
-    payload = {
-        "job_id": job_id,
-        "speech": speech or "",
-        "digits": digits or "",
-        "status": "pending",
-        "created": time.time(),
-        "phase": "first_hold",
-        "ready": False,
-        "call_sid": request.values.get("CallSid", ""),
-        "heard": speech or digits,
-        "created_ms": now_ms,
-        # fields the result poller expects when ready:
-        # "tts_url": "", "ready_text": ""
-    }
-    save_state(job_id, payload)
-    current_app.logger.info("[STATE] created job=%s speech=%r digits=%r", job_id, speech, digits)
 
-    # TEMP FAST-PATH: immediately synthesize an echo mp3 and mark ready.
-    try:
-        echo_text = f"You said: {speech or digits or 'nothing'}."
-        url = tts_line_url(echo_text)  # your existing function that returns a PUBLIC URL
-        payload.update({
-            "status": "ready",
-            "ready_text": echo_text,
-            "tts_url": url,
-            "ready_at": time.time(),
-        })
-        save_state(job_id, payload)
-        current_app.logger.info("[STATE] FAST-READY job=%s url=%s", job_id, url)
-    except Exception as e:
-        current_app.logger.exception("[STATE] FAST-READY failed job=%s: %s", job_id, e)
+    # initial state
+    state_set(job_id, {"status": "working", "heard": text})
 
-    # keep your real async thread-start under a feature flag so it can still run:
-    if _env_bool("ASYNC_REAL_WORK", True):
-        start_async_processing(job_id, speech or digits)
-    
+    def _worker(jid: str, utter: str):
+        try:
+            # tiny think time to simulate work
+            time.sleep(0.5)
+            # build reply line + turn it into a public MP3 url
+            say = f"You said: {utter or 'nothing'}."
+            mp3_url = tts_line_url(say) or public_url("/static/tts_cache/holdy_tiny.mp3")
+            state_set(jid, {"status": "done", "heard": utter, "reply_url": mp3_url})
+        except Exception as e:
+            current_app.logger.exception("[JOB] worker failed for %s: %s", jid, e)
+            state_set(jid, {"status": "error", "error": str(e)})
+
+    threading.Thread(target=_worker, args=(job_id, text), daemon=True).start()
     return job_id
 
 @app.post("/handle")
@@ -5558,53 +5549,19 @@ def handle():
 
 @app.post("/handle_gather")
 def handle_gather():
-    # Extract form data
     form = request.form
     speech = form.get("SpeechResult", "").strip()
     digits = form.get("Digits", "").strip()
-    conf = float(form.get("Confidence", "0") or 0)
-    
+
     if VOICE_SAFE_MODE:
         vr = VoiceResponse()
         vr.say(f"Heard: {speech or digits or 'nothing'}")
-        current_app.logger.info("[SAFE] say-only reply (speech=%r digits=%r)", speech, digits)
         return xml_response(vr)
-    
-    # Normal path - store SpeechResult into job and redirect
-    if speech or digits:
-        # Create/resolve job_id
-        job_id = save_state_and_start_async_process(speech, digits)
-        current_app.logger.info("[GATHER->RESULT] speech=%r digits=%r -> job=%s", speech, digits, job_id)
-        _state_debug(job_id, "after gather")
-        vr = VoiceResponse()
-        vr.redirect(public_url(f"/result?job={job_id}"), method="POST")
-        
-        # Log final TwiML if DIAG_TWILIO is enabled
-        if DIAG_TWILIO:
-            current_app.logger.info("[TWIML /handle_gather]\n%s", vr.to_xml())
-        
-        return xml_response(vr)
-    else:
-        # Re-prompt with identical Gather
-        vr = VoiceResponse()
-        vr.play(public_url("/static/tts_cache/reprompt_listening.mp3"))
-        vr.gather(
-            input="speech dtmf",
-            speechModel="phone_call",
-            speechTimeout="3",
-            timeout="3",
-            bargeIn=True,
-            profanityFilter=False,
-            actionOnEmptyResult=True,
-            method="POST",
-            action=public_url("/handle_gather")
-        )
-        
-        # Log final TwiML if DIAG_TWILIO is enabled
-        if DIAG_TWILIO:
-            current_app.logger.info("[TWIML /handle_gather]\n%s", vr.to_xml())
-        
-        return xml_response(vr)
+
+    job_id = save_state_and_start_async_process(speech, digits)
+    vr = VoiceResponse()
+    vr.redirect(public_url(f"/result?job={job_id}"), method="POST")
+    return xml_response(vr)
     
 @app.route("/dept_choice", methods=["POST"])
 def dept_choice():
