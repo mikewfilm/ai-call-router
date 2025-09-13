@@ -67,7 +67,7 @@ VOICE_SAFE_MODE = _env_bool("VOICE_SAFE_MODE", False)
 HOLDY_TINY_CDN = os.getenv("HOLDY_TINY_CDN", "https://call-router-audio-2526.twil.io/holdy_tiny.mp3")
 HOLDY_MID_CDN = os.getenv("HOLDY_MID_CDN", "https://call-router-audio-2526.twil.io/holdy_mid.mp3")
 HOLD_BG_CDN = os.getenv("HOLD_BG_CDN", "")
-HOLDY_CLARIFY_CDN = os.getenv("HOLDY_CLARIFY_CDN", "")
+HOLDY_CLARIFY_CDN = os.getenv("HOLDY_CLARIFY_CDN", "https://call-router-audio-2526.twil.io/holdy_clarify.mp3")
 CALL_TIMEOUT_SECONDS = int(os.getenv("CALL_TIMEOUT_SECONDS", "300"))
 POLL_PAUSE = int(os.getenv("POLL_PAUSE", "2"))
 HOLD_MIN_GAP_SEC = int(os.getenv("HOLD_MIN_GAP_SEC", "8"))
@@ -4861,12 +4861,20 @@ def result():
         current_app.logger.info("[RESULT] job=%s ready: reply_text -> play", job_id)
         return xml_response(vr)
 
-    # Not ready yet -> hold + poll again
-    hold = os.getenv("HOLDY_TINY_CDN", "") or public_url("/static/tts_cache/holdy_tiny.mp3")
-    vr.play(hold)
+    # Not ready yet -> smoother hold + poll again
+    hold = HOLDY_MID_CDN or public_url("/static/tts_cache/holdy_mid.mp3")
+    vr.play(hold)                     # ~2–3s clip, smoother than "tiny"
+    vr.pause(length=1)                # softens edge before the redirect
+
     next_n = n + 1
-    vr.redirect(public_url(f"/result?job={job_id}&n={next_n}&t={int(time.time())}"), method="POST")
-    current_app.logger.info("[RESULT] job=%s pending -> hold+redirect n=%d", job_id, next_n)
+    vr.redirect(
+        public_url(f"/result?job={job_id}&n={next_n}&t={int(time.time())}"),
+        method="POST"
+    )
+    current_app.logger.info(
+        "[RESULT] job=%s pending -> hold_mid+pause+redirect n=%d",
+        job_id, next_n
+    )
     return xml_response(vr)
 
 
@@ -5383,8 +5391,8 @@ def voice_post():
     vr.gather(
         input="speech dtmf",
         speechModel="phone_call",
-        speechTimeout="3",
-        timeout="3",
+        speechTimeout="5",
+        timeout="5",
         bargeIn=True,
         profanityFilter=False,
         actionOnEmptyResult=True,
